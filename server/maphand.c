@@ -519,6 +519,12 @@ void send_tile_info(struct conn_list *dest, struct tile *ptile,
       info.resource = (NULL != tile_resource(ptile))
                        ? extra_number(tile_resource(ptile))
                        : MAX_EXTRA_TYPES;
+      info.placing = (NULL != ptile->placing)
+                      ? extra_number(ptile->placing)
+                      : -1;
+      info.place_turn = (NULL != ptile->placing)
+                         ? game.info.turn + ptile->infra_turns
+                         : 0;
 
       if (pplayer != NULL) {
 	info.extras = map_get_player_tile(ptile, pplayer)->extras;
@@ -556,6 +562,8 @@ void send_tile_info(struct conn_list *dest, struct tile *ptile,
       info.resource = (NULL != plrtile->resource)
                        ? extra_number(plrtile->resource)
                        : MAX_EXTRA_TYPES;
+      info.placing = -1;
+      info.place_turn = 0;
 
       info.extras = plrtile->extras;
 
@@ -576,6 +584,8 @@ void send_tile_info(struct conn_list *dest, struct tile *ptile,
 
       info.terrain = terrain_count();
       info.resource = MAX_EXTRA_TYPES;
+      info.placing = -1;
+      info.place_turn = 0;
 
       BV_CLR_ALL(info.extras);
 
@@ -1319,16 +1329,11 @@ struct player_tile *map_get_player_tile(const struct tile *ptile,
 bool update_player_tile_knowledge(struct player *pplayer, struct tile *ptile)
 {
   struct player_tile *plrtile = map_get_player_tile(ptile, pplayer);
-  bool plrtile_owner_valid = game.server.foggedborders
-                             && !map_is_known_and_seen(ptile, pplayer, V_MAIN);
-  struct player *owner = plrtile_owner_valid
-                         ? plrtile->owner
-                         : tile_owner(ptile);
 
   if (plrtile->terrain != ptile->terrain
       || !BV_ARE_EQUAL(plrtile->extras, ptile->extras)
       || plrtile->resource != ptile->resource
-      || owner != tile_owner(ptile)
+      || plrtile->owner != tile_owner(ptile)
       || plrtile->extras_owner != extra_owner(ptile)) {
     plrtile->terrain = ptile->terrain;
     extra_type_iterate(pextra) {
@@ -1339,9 +1344,7 @@ bool update_player_tile_knowledge(struct player *pplayer, struct tile *ptile)
       }
     } extra_type_iterate_end;
     plrtile->resource = ptile->resource;
-    if (plrtile_owner_valid) {
-      plrtile->owner = tile_owner(ptile);
-    }
+    plrtile->owner = tile_owner(ptile);
     plrtile->extras_owner = extra_owner(ptile);
 
     return TRUE;
@@ -1745,7 +1748,13 @@ static void check_units_single_tile(struct tile *ptile)
                         E_UNIT_RELOCATED, ftc_server,
                         _("Moved your %s due to changing terrain."),
                         unit_link(punit));
-          unit_alive = unit_move(punit, ptile2, 0, NULL, FALSE);
+          /* TODO: should a unit be able to bounce to a transport like is
+           * done below? What if the unit can't legally enter the transport,
+           * say because the transport is Unreachable and the unit doesn't
+           * have it in its embarks field or because "Transport Embark"
+           * isn't enabled? Kept like it was to preserve the old rules for
+           * now. -- Sveinung */
+          unit_alive = unit_move(punit, ptile2, 0, NULL, TRUE, FALSE);
           if (unit_alive && punit->activity == ACTIVITY_SENTRY) {
             unit_activity_handling(punit, ACTIVITY_IDLE);
           }
@@ -2485,20 +2494,19 @@ void destroy_extra(struct tile *ptile, struct extra_type *pextra)
 }
 
 /**********************************************************************//**
-  Give player pto the map of pfrom, but do some random damage; good to bad
-  is the ratio of tiles revealed to tiles not revealed, e.g., calling
-  give_distorted_map(pfrom, pto, 1, 1, TRUE) reveals half the map on
-  average. If reveal_cities is TRUE tiles with cities are always revealed.
+  Transfer (random parts of) player pfrom's world map to pto.
+  @param pfrom         player that is the source of the map
+  @param pto           player that receives the map
+  @param prob          probability for the transfer each known tile
+  @param reveal_cities if the map of all known cities should be transferred
 **************************************************************************/
 void give_distorted_map(struct player *pfrom, struct player *pto,
-                        int good, int bad, bool reveal_cities)
+                        int prob, bool reveal_cities)
 {
-  int all = good + bad;
-
   buffer_shared_vision(pto);
 
   whole_map_iterate(&(wld.map), ptile) {
-    if (fc_rand(all) >= bad) {
+    if (fc_rand(100) < prob) {
       give_tile_info_from_player_to_player(pfrom, pto, ptile);
     } else if (reveal_cities && NULL != tile_city(ptile)) {
       give_tile_info_from_player_to_player(pfrom, pto, ptile);

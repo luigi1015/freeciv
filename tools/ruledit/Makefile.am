@@ -16,6 +16,7 @@ AM_CPPFLAGS = \
 	$(ruledit_cppflags) \
 	-I$(top_srcdir)/utility \
 	-I$(top_srcdir)/common \
+	-I$(top_srcdir)/common/aicore \
 	-I$(top_srcdir)/common/networking \
 	-I$(top_srcdir)/server \
 	-I$(top_srcdir)/tools/shared \
@@ -29,6 +30,7 @@ MOC_FILES = \
             meta_edit_utype.cpp \
 	    meta_effect_edit.cpp \
 	    meta_req_edit.cpp	\
+	    meta_req_vec_fix.cpp	\
             meta_requirers_dlg.cpp \
             meta_ruledit_qt.cpp \
             meta_tab_enablers.cpp \
@@ -74,6 +76,8 @@ freeciv_ruledit_SOURCES =	\
 		tab_unit.h	\
 		req_edit.cpp	\
 		req_edit.h	\
+		req_vec_fix.h	\
+		req_vec_fix.cpp	\
 		requirers_dlg.cpp \
 		requirers_dlg.h	\
 		ruledit.cpp	\

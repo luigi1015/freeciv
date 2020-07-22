@@ -1,9 +1,11 @@
 
-project('freeciv', 'c', meson_version: '>= 0.44.0')
+project('freeciv', 'c', meson_version: '>= 0.48.0')
 
 if not get_option('ack_experimental')
   error('Autotools are still the only fully supported way to build freeciv.\nSet configure option "ack_experimental" to true if you really want to do experimental meson build.')
 endif
+
+host_system = host_machine.system()
 
 priv_conf_data = configuration_data()
 pub_conf_data = configuration_data()
@@ -46,7 +48,8 @@ pub_headers = [
   'sys/select.h',
   'netinet/in.h',
   'dirent.h',
-  'stdbool.h'
+  'stdbool.h',
+  'winsock2.h'
   ]
 
 priv_headers = [
@@ -94,6 +97,7 @@ endforeach
 priv_functions = [
   'fork',
   'vfork',
+  'iconv',
   'backtrace',
   'bind',
   'connect',
@@ -132,7 +136,9 @@ priv_functions = [
   '_mkdir',
   '_setjmp',
   '_strcoll',
-  '_stricoll'
+  '_stricoll',
+  'fcntl',
+  'ioctl'
   ]
 
 foreach func : priv_functions
@@ -140,6 +146,43 @@ foreach func : priv_functions
     priv_conf_data.set('HAVE_' + func.underscorify().to_upper(), 1)
   endif
 endforeach
+
+readline_dep = c_compiler.find_library('readline', required:false)
+
+if readline_dep.found()
+  pub_conf_data.set('FREECIV_HAVE_LIBREADLINE', 1)
+endif
+
+if c_compiler.compiles('''#include <netinet/in.h>
+int main(void) { struct ip_mreqn req; req.imr_ifindex = 0; return 0; }''')
+  priv_conf_data.set('HAVE_IP_MREQN', 1)
+endif
+
+if host_system == 'windows'
+  pub_conf_data.set('FREECIV_MSWINDOWS', 1)
+  pub_conf_data.set('FREECIV_HAVE_TINYCTHR', 1)
+  pub_conf_data.set('FREECIV_HAVE_WINSOCK', 1)
+  priv_conf_data.set('ALWAYS_ROOT', 1)
+  ws2_dep = c_compiler.find_library('ws2_32')
+else
+  pub_conf_data.set('FREECIV_HAVE_PTHREAD', 1)
+  ws2_dep = []
+endif
+
+if get_option('cacert-path') != ''
+  priv_conf_data.set('CUSTOM_CACERT_PATH',
+                     '"' + get_option('cacert-path') + '"')
+endif
+
+if get_option('json-protocol')
+  if not c_compiler.has_header('jansson.h')
+    error('json-protocol requires jansson.h header, but it is not found')
+  endif
+  pub_conf_data.set('FREECIV_JSON_CONNECTION', 1)
+  jansson_dep = c_compiler.find_library('jansson')
+else
+  jansson_dep = []
+endif
 
 configure_file(input : 'gen_headers/meson_fc_config.h.in',
                output : 'fc_config.h',
@@ -151,7 +194,16 @@ configure_file(input : 'gen_headers/meson_freeciv_config.h.in',
 add_global_arguments('-DHAVE_CONFIG_H',
                      language: 'c')
 
-common_inc = include_directories('dependencies/lua-5.4/src',
+if meson.is_cross_build()
+  cross_inc_path = meson.get_cross_property('cross_inc_path')
+  cross_lib_path = meson.get_cross_property('cross_lib_path')
+else
+  cross_inc_path = []
+  cross_lib_path = []
+endif
+
+common_inc = include_directories(cross_inc_path,
+  'dependencies/lua-5.4/src', 'dependencies/tinycthread',
   'dependencies/tolua-5.2/include', 'dependencies/cvercmp',
   'utility', 'common', 'common/networking', 'common/scriptcore',
   'common/aicore')
@@ -170,23 +222,23 @@ verhdr = custom_target('verhdr', output: 'version_gen.h',
               depend_files: files('fc_version'))
 
 specenum = custom_target('specenum_gen.h', output: 'specenum_gen.h',
-                         command: ['python', files('utility/generate_specenum.py'),
+                         command: ['python3', files('utility/generate_specenum.py'),
                                    '@OUTPUT@'])
 
 pack_common = custom_target('packets_common', output: ['packets_gen.h',
                                                        'packets_gen.c'],
-                            command: ['python', files('common/generate_packets.py'),
+                            command: ['python3', files('common/generate_packets.py'),
                                       '@OUTPUT0@', '@OUTPUT1@', '', '', '', ''],
                             depend_files: files('common/networking/packets.def'))
 
 pack_server = custom_target('packets_server', output: ['hand_gen.h', 'hand_gen.c'],
-                            command: ['python', files('common/generate_packets.py'),
+                            command: ['python3', files('common/generate_packets.py'),
                                       '', '', '', '', '@OUTPUT0@', '@OUTPUT1@'],
                             depend_files: files('common/networking/packets.def'))
 
 pack_client = custom_target('packets_client', output: ['packhand_gen.h',
                                                        'packhand_gen.c'],
-                            command: ['python', files('common/generate_packets.py'),
+                            command: ['python3', files('common/generate_packets.py'),
                                       '', '', '@OUTPUT0@', '@OUTPUT1@', '', ''],
                             depend_files: files('common/networking/packets.def'))
 
@@ -231,6 +283,12 @@ tolua_signal = custom_target('tolua_signal',
                                        '-H', '@OUTPUT1@',
                                        files('common/scriptcore/tolua_signal.pkg')])
 
+if host_system == 'windows'
+  tinycthr_files = files('dependencies/tinycthread/tinycthread.c')
+else
+  tinycthr_files = files()
+endif
+
 fc_deps = static_library('fc_dependencies',
   'dependencies/cvercmp/cvercmp.c',
   'dependencies/lua-5.4/src/lapi.c',
@@ -272,6 +330,7 @@ fc_deps = static_library('fc_dependencies',
   'dependencies/tolua-5.2/src/lib/tolua_to.c',
   'dependencies/luasql/src/luasql.c',
   'dependencies/luasql/src/ls_sqlite3.c',
+  tinycthr_files,
   sources: verhdr,
   include_directories : common_inc
   )
@@ -309,6 +368,7 @@ common_lib = library('freeciv',
   'utility/string_vector.c',
   'utility/support.c',
   'utility/timing.c',
+  'common/aicore/aiactions.c',
   'common/aicore/aisupport.c',
   'common/aicore/caravan.c',
   'common/aicore/citymap.c',
@@ -387,12 +447,12 @@ common_lib = library('freeciv',
   sources: [specenum, pack_common,
             tolua_com_a, tolua_com_z, tolua_game, tolua_signal],
   link_whole: fc_deps,
-  dependencies: [c_compiler.find_library('libicuuc'),
+  dependencies: [c_compiler.find_library('libicuuc', dirs: cross_lib_path),
                  c_compiler.find_library('m'),
-                 c_compiler.find_library('z'),
-                 c_compiler.find_library('libcurl'),
-                 c_compiler.find_library('libsqlite3'),
-                 dependency('threads')],
+                 c_compiler.find_library('z', dirs: cross_lib_path),
+                 c_compiler.find_library('libcurl', dirs: cross_lib_path),
+                 c_compiler.find_library('libsqlite3', dirs: cross_lib_path),
+                 ws2_dep, jansson_dep, dependency('threads')],
   install : true
   )
 
@@ -417,12 +477,14 @@ ais = static_library('fc_ai',
   'ai/default/aitech.c',
   'ai/default/aitools.c',
   'ai/default/aiunit.c',
+  'ai/default/daiactions.c',
   'ai/default/daicity.c',
   'ai/default/daidiplomacy.c',
   'ai/default/daidomestic.c',
   'ai/default/daieffects.c',
   'ai/default/daimilitary.c',
-  include_directories: [server_inc, include_directories('ai/default')]
+  include_directories: [server_inc, include_directories('ai/default')],
+  sources: [verhdr]
   )
 
 server_lib = static_library('fc_server',
@@ -510,7 +572,8 @@ executable('freeciv-server',
   'server/civserver.c',
   include_directories: server_inc,
   link_with: [server_lib, common_lib, ais],
-  dependencies: [c_compiler.find_library('m')],
+  dependencies: [c_compiler.find_library('m'),
+                 ws2_dep, readline_dep],
   install: true
   )
 
@@ -1133,8 +1196,8 @@ client_common = static_library('fc_client_common',
   include_directories: client_inc,
   link_with: [common_lib],
   dependencies: [c_compiler.find_library('m'),
-                 c_compiler.find_library('libSDL2'),
-                 c_compiler.find_library('libSDL2_mixer')]
+                 c_compiler.find_library('libSDL2', dirs: cross_lib_path),
+                 c_compiler.find_library('libSDL2_mixer', dirs: cross_lib_path)]
   )
 
 install_data('data/helpdata.txt',
@@ -1913,9 +1976,13 @@ install_data('data/stdsounds/foot3.ogg',
 
 endif
 
-gtk322_dep = dependency('gtk+-3.0', version : '>= 3.22')
+gtk322_dep = dependency('gtk+-3.0', version : '>= 3.22', required : false)
 
 if get_option('clients').contains('gtk3.22')
+
+if not gtk322_dep.found()
+  error('gtk+-3.0 >= 3.22 required for gtk3.22-client, but not found')
+endif
 
 executable('freeciv-gtk3.22',
   'client/gui-gtk-3.22/action_dialog.c',
@@ -1966,7 +2033,7 @@ executable('freeciv-gtk3.22',
   'client/gui-gtk-3.22/voteinfo_bar.c',
   'client/gui-gtk-3.22/wldlg.c',
   include_directories: client_inc,
-  dependencies: gtk322_dep,
+  dependencies: [gtk322_dep, ws2_dep],
   link_with: client_common,
   install: true
   )
@@ -1990,11 +2057,15 @@ endif
 
 if get_option('fcmp').contains('gtk3')
 
+if not gtk322_dep.found()
+  error('gtk+-3.0 required for gtk3 modpack installer, but not found')
+endif
+
 executable('freeciv-mp-gtk3',
   'tools/fcmp/mpgui_gtk3.c',
   include_directories: tool_inc,
   dependencies: [gtk322_dep,
-                 c_compiler.find_library('libsqlite3')],
+                 c_compiler.find_library('libsqlite3', dirs: cross_lib_path)],
   link_with: [common_lib, fcmp_common],
   install: true
   )
@@ -2006,7 +2077,7 @@ if get_option('fcmp').contains('cli')
 executable('freeciv-mp-cli',
   'tools/fcmp/mpcli.c',
   include_directories: tool_inc,
-  dependencies: [c_compiler.find_library('libsqlite3')],
+  dependencies: [c_compiler.find_library('libsqlite3', dirs: cross_lib_path)],
   link_with: [common_lib, fcmp_common],
   install: true
   )
@@ -2024,7 +2095,8 @@ executable('freeciv-ruleup',
   'tools/ruleup.c',
   link_with: [common_lib, server_lib, tool_lib, ais],
   include_directories: tool_inc,
-  dependencies: [c_compiler.find_library('m')],
+  dependencies: [c_compiler.find_library('m'),
+                 ws2_dep, readline_dep],
   install: true
   )
 
@@ -2034,7 +2106,8 @@ executable('freeciv-manual',
   link_with: [common_lib, server_lib, tool_lib, ais],
   include_directories: [tool_inc,
                         include_directories('client', 'client/include')],
-  dependencies: [c_compiler.find_library('m')],
+  dependencies: [c_compiler.find_library('m'),
+                 ws2_dep, readline_dep],
   install: true
   )
 
@@ -2138,6 +2211,7 @@ install_data(
   'doc/README.fcdb',
   'doc/README.governor',
   'doc/README.graphics',
+  'doc/README.modpack_installer',
   'doc/README.msys2',
   'doc/README.nations',
   'doc/README.packaging',

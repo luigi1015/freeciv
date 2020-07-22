@@ -96,8 +96,8 @@ static bool is_flush_queued = FALSE;
 /**********************************************************************//**
   Flush the mapcanvas part of the buffer(s) to the screen.
 **************************************************************************/
-void flush_mapcanvas(int canvas_x, int canvas_y,
-                     int pixel_width, int pixel_height)
+static void flush_mapcanvas(int canvas_x, int canvas_y,
+                            int pixel_width, int pixel_height)
 {
   SDL_Rect rect = {canvas_x, canvas_y, pixel_width, pixel_height};
 
@@ -315,11 +315,13 @@ void set_indicator_icons(struct sprite *bulb, struct sprite *sol,
   FREESURFACE(pBuf->theme);
   pBuf->theme = adj_surf(GET_SURF(sol));
   widget_redraw(pBuf);
+  widget_mark_dirty(pBuf);
 
   pBuf = get_widget_pointer_form_main_list(ID_COOLING_ICON);
   FREESURFACE(pBuf->theme);
   pBuf->theme = adj_surf(GET_SURF(flake));
   widget_redraw(pBuf);
+  widget_mark_dirty(pBuf);
 
   pBuf = get_revolution_widget();
   set_new_icon2_theme(pBuf, adj_surf(GET_SURF(gov)), TRUE);
@@ -500,7 +502,7 @@ void update_info_label(void)
 **************************************************************************/
 static int focus_units_info_callback(struct widget *pwidget)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     struct unit *punit = pwidget->data.unit;
 
     if (punit) {
@@ -791,7 +793,7 @@ void redraw_unit_info_label(struct unit_list *punitlist)
         struct ADVANCED_DLG *pDlg = pInfo_Window->private_data.adv_dlg;
         struct widget *pBuf = NULL, *pEnd = NULL, *pDock;
         struct city *pHome_City;
-        struct unit_type *pUType;
+        const struct unit_type *putype;
         int num_w, num_h;
 
         if (pDlg->pEndActiveWidgetList && pDlg->pBeginActiveWidgetList) {
@@ -809,18 +811,18 @@ void redraw_unit_info_label(struct unit_list *punitlist)
             continue;
 	  }
 
-          pUType = unit_type_get(aunit);
-          vetname = utype_veteran_name_translation(pUType, aunit->veteran);
+          putype = unit_type_get(aunit);
+          vetname = utype_veteran_name_translation(putype, aunit->veteran);
           pHome_City = game_city_by_number(aunit->homecity);
           fc_snprintf(buffer, sizeof(buffer), "%s (%d,%d,%s)%s%s\n%s\n(%d/%d)\n%s",
-                      utype_name_translation(pUType),
-                      pUType->attack_strength,
-                      pUType->defense_strength,
-                      move_points_text(pUType->move_rate, FALSE),
+                      utype_name_translation(putype),
+                      putype->attack_strength,
+                      putype->defense_strength,
+                      move_points_text(putype->move_rate, FALSE),
                       (vetname != NULL ? "\n" : ""),
                       (vetname != NULL ? vetname : ""),
                       unit_activity_text(aunit),
-                      aunit->hp, pUType->hp,
+                      aunit->hp, putype->hp,
                       pHome_City ? city_name_get(pHome_City) : Q_("?homecity:None"));
 
           buf_surf = create_surf(tileset_full_tile_width(tileset),
@@ -1230,3 +1232,9 @@ void update_overview_scroll_window_pos(int x, int y)
 {
   /* TODO: PORTME. */
 }
+
+/**********************************************************************//**
+  New turn callback
+**************************************************************************/
+void start_turn(void)
+{}

@@ -48,7 +48,7 @@ enum production_class_type {
  * Used in the network protocol.
  */
 #define SPECENUM_NAME city_options
-/* If building a settler at size 1 disbands the city */
+/* If unit production (e.g. settler) is allowed to disband a small city */
 #define SPECENUM_VALUE0 CITYO_DISBAND
 #define SPECENUM_VALUE0NAME "Disband"
 /* If new citizens are science specialists */
@@ -290,18 +290,11 @@ enum city_updates {
   CU_POPUP_DIALOG       = 1 << 2
 };
 
-/* See city_build_here_test(). */
-enum city_build_result {
-  CB_OK,
-  CB_BAD_CITY_TERRAIN,
-  CB_BAD_UNIT_TERRAIN,
-  CB_BAD_BORDERS,
-  CB_NO_MIN_DIST
-};
-
 struct tile_cache; /* defined and only used within city.c */
 
 struct adv_city; /* defined in ./server/advisors/infracache.h */
+
+struct cm_parameter; /* defined in ./common/aicore/cm.h */
 
 struct city {
   char name[MAX_LEN_CITYNAME];
@@ -399,6 +392,8 @@ struct city {
     bool vigilant;
     struct unit_order *orders;
   } rally_point;
+
+  struct cm_parameter *cm_parameter;
 
   union {
     struct {
@@ -557,21 +552,21 @@ bool city_is_occupied(const struct city *pcity);
 /* city related improvement and unit functions */
 
 int city_improvement_upkeep(const struct city *pcity,
-			    const struct impr_type *pimprove);
+                            const struct impr_type *pimprove);
 
 bool can_city_build_improvement_direct(const struct city *pcity,
-				       struct impr_type *pimprove);
+                                       const struct impr_type *pimprove);
 bool can_city_build_improvement_later(const struct city *pcity,
-				      struct impr_type *pimprove);
+                                      const struct impr_type *pimprove);
 bool can_city_build_improvement_now(const struct city *pcity,
-				    struct impr_type *pimprove);
+                                    const struct impr_type *pimprove);
 
 bool can_city_build_unit_direct(const struct city *pcity,
-				const struct unit_type *punittype);
+                                const struct unit_type *punittype);
 bool can_city_build_unit_later(const struct city *pcity,
-			       const struct unit_type *punittype);
+                               const struct unit_type *punittype);
 bool can_city_build_unit_now(const struct city *pcity,
-			     const struct unit_type *punittype);
+                             const struct unit_type *punittype);
 
 bool can_city_build_direct(const struct city *pcity,
                            const struct universal *target);
@@ -584,7 +579,7 @@ int city_unit_slots_available(const struct city *pcity);
 bool city_can_use_specialist(const struct city *pcity,
 			     Specialist_type_id type);
 bool city_has_building(const struct city *pcity,
-		       const struct impr_type *pimprove);
+                       const struct impr_type *pimprove);
 bool is_capital(const struct city *pcity);
 bool is_gov_center(const struct city *pcity);
 bool city_got_defense_effect(const struct city *pcity,
@@ -593,6 +588,8 @@ bool city_got_defense_effect(const struct city *pcity,
 int city_production_build_shield_cost(const struct city *pcity);
 bool city_production_build_units(const struct city *pcity,
                                  bool add_production, int *num_units);
+int city_production_unit_veteran_level(struct city *pcity,
+                                       const struct unit_type *punittype);
 
 bool city_production_has_flag(const struct city *pcity,
                               enum impr_flag_id flag);
@@ -615,7 +612,7 @@ void city_choose_build_default(struct city *pcity);
 /* textual representation of buildings */
 
 const char *city_improvement_name_translation(const struct city *pcity,
-					      struct impr_type *pimprove);
+					      const struct impr_type *pimprove);
 const char *city_production_name_translation(const struct city *pcity);
 
 /* city map functions */
@@ -652,10 +649,11 @@ bool base_city_can_work_tile(const struct player *restriction,
                              const struct tile *ptile);
 bool city_can_work_tile(const struct city *pcity, const struct tile *ptile);
 
+bool citymindist_prevents_city_on_tile(const struct tile *ptile);
+
 bool city_can_be_built_here(const struct tile *ptile,
                             const struct unit *punit);
-enum city_build_result city_build_here_test(const struct tile *ptile,
-                                            const struct unit *punit);
+bool city_can_be_built_tile_only(const struct tile *ptile);
 
 /* list functions */
 struct city *city_list_find_number(struct city_list *This, int id);

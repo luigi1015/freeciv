@@ -1928,7 +1928,7 @@ static bool objbind_get_allowed_value_span(struct objbind *ob,
       switch (propid) {
       case OPID_UNIT_MOVES_LEFT:
         *pmin = 0;
-        *pmax = 65535; /* packets.def MOVEFRAGS */
+        *pmax = MAX_MOVE_FRAGS;
         *pstep = 1;
         *pbig_step = 5;
         return TRUE;
@@ -2869,7 +2869,7 @@ static void objprop_widget_entry_changed(GtkEntry *entry, gpointer userdata)
 
   op = userdata;
   pp = objprop_get_property_page(op);
-  value.data.v_const_string = gtk_entry_get_text(entry);
+  value.data.v_const_string = gtk_entry_buffer_get_text(gtk_entry_get_buffer(entry));
 
   property_page_change_value(pp, op, &value);  
 }
@@ -3191,9 +3191,10 @@ static void objprop_refresh_widget(struct objprop *op,
   case OPID_TILE_LABEL:
     entry = objprop_get_child_widget(op, "entry");
     if (pv) {
-      gtk_entry_set_text(GTK_ENTRY(entry), pv->data.v_string);
+      gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(entry)),
+                                pv->data.v_string, -1);
     } else {
-      gtk_entry_set_text(GTK_ENTRY(entry), "");
+      gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(entry)), "", -1);
     }
     gtk_widget_set_sensitive(entry, pv != NULL);
     break;
@@ -4670,7 +4671,7 @@ static void property_page_quick_find_entry_changed(GtkWidget *entry,
   bool matched;
 
   pp = userdata;
-  text = gtk_entry_get_text(GTK_ENTRY(entry));
+  text = gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(entry)));
   pf = property_filter_new(text);
 
   property_page_objprop_iterate(pp, op) {
@@ -4718,7 +4719,7 @@ property_page_new(enum editor_object_type objtype,
   const char *attr_type_str, *name, *tooltip;
   gchar *title;
 
-  if (!(0 <= objtype && objtype < NUM_OBJTYPES)) {
+  if (!(objtype < NUM_OBJTYPES)) {
     return NULL;
   }
 
@@ -4915,7 +4916,7 @@ property_page_new(enum editor_object_type objtype,
   gtk_widget_set_margin_bottom(hbox2, 4);
   gtk_container_add(GTK_CONTAINER(vbox2), hbox2);
 
-  button = gtk_button_new_with_label(_("Close"));
+  button = gtk_button_new_with_mnemonic(_("_Close"));
   gtk_size_group_add_widget(sizegroup, button);
   g_signal_connect_swapped(button, "clicked",
       G_CALLBACK(gtk_widget_hide), pe->widget);
@@ -4989,7 +4990,7 @@ property_page_new(enum editor_object_type objtype,
   gtk_grid_set_column_spacing(GTK_GRID(hbox2), 4);
   gtk_container_add(GTK_CONTAINER(vbox), hbox2);
 
-  button = gtk_button_new_with_label(_("Refresh"));
+  button = gtk_button_new_with_mnemonic(_("_Refresh"));
   gtk_size_group_add_widget(sizegroup, button);
   gtk_widget_set_tooltip_text(button,
       _("Pressing this button will reset all modified properties of "
@@ -4999,7 +5000,7 @@ property_page_new(enum editor_object_type objtype,
                    G_CALLBACK(property_page_refresh_button_clicked), pp);
   gtk_container_add(GTK_CONTAINER(hbox2), button);
 
-  button = gtk_button_new_with_label(_("Apply"));
+  button = gtk_button_new_with_mnemonic(_("_Apply"));
   gtk_size_group_add_widget(sizegroup, button);
   gtk_widget_set_tooltip_text(button,
       _("Pressing this button will send all modified properties of "
@@ -6100,7 +6101,7 @@ static bool property_editor_add_page(struct property_editor *pe,
     return FALSE;
   }
 
-  if (!(0 <= objtype && objtype < NUM_OBJTYPES)) {
+  if (!(objtype < NUM_OBJTYPES)) {
     return FALSE;
   }
 
@@ -6124,9 +6125,9 @@ static bool property_editor_add_page(struct property_editor *pe,
 ****************************************************************************/
 static struct property_page *
 property_editor_get_page(struct property_editor *pe,
-                         enum editor_object_type objtype)
+			 enum editor_object_type objtype)
 {
-  if (!pe || !(0 <= objtype && objtype < NUM_OBJTYPES)) {
+  if (!pe || !(objtype < NUM_OBJTYPES)) {
     return NULL;
   }
 
@@ -6238,7 +6239,7 @@ void property_editor_popup(struct property_editor *pe,
   gtk_widget_show(pe->widget);
 
   gtk_window_present(GTK_WINDOW(pe->widget));
-  if (0 <= objtype && objtype < NUM_OBJTYPES) {
+  if (objtype < NUM_OBJTYPES) {
     gtk_notebook_set_current_page(GTK_NOTEBOOK(pe->notebook), objtype);
   }
 }
@@ -6269,7 +6270,7 @@ void property_editor_handle_object_changed(struct property_editor *pe,
     return;
   }
 
-  if (!(0 <= objtype && objtype < NUM_OBJTYPES)) {
+  if (!(objtype < NUM_OBJTYPES)) {
     return;
   }
 

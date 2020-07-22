@@ -118,15 +118,15 @@ void unit_assign_specific_activity_target(struct unit *punit,
 void unit_forget_last_activity(struct unit *punit);
 
 /* creation/deletion/upgrading */
-void transform_unit(struct unit *punit, struct unit_type *to_unit,
+void transform_unit(struct unit *punit, const struct unit_type *to_unit,
                     bool has_to_pay);
 struct unit *create_unit(struct player *pplayer, struct tile *ptile,
-			 struct unit_type *punittype,
-			 int veteran_level, int homecity_id, int moves_left);
+                         const struct unit_type *punittype,
+                         int veteran_level, int homecity_id, int moves_left);
 struct unit *create_unit_full(struct player *pplayer, struct tile *ptile,
-			      struct unit_type *punittype, int veteran_level,
-			      int homecity_id, int moves_left, int hp_left,
-			      struct unit *ptrans);
+                              const struct unit_type *punittype, int veteran_level,
+                              int homecity_id, int moves_left, int hp_left,
+                              struct unit *ptrans);
 void wipe_unit(struct unit *punit, enum unit_loss_reason reason,
                struct player *killer);
 void kill_unit(struct unit *pkiller, struct unit *punit, bool vet);
@@ -150,13 +150,16 @@ void unit_goes_out_of_sight(struct player *pplayer, struct unit *punit);
 
 /* doing a unit activity */
 void do_nuclear_explosion(struct player *pplayer, struct tile *ptile);
-bool do_airline(struct unit *punit, struct city *city2);
+bool do_airline(struct unit *punit, struct city *city2,
+                const struct action *paction);
 void do_explore(struct unit *punit);
-bool do_paradrop(struct unit *punit, struct tile *ptile);
+bool do_paradrop(struct unit *punit, struct tile *ptile,
+                 const struct action *paction);
 void unit_transport_load_send(struct unit *punit, struct unit *ptrans);
 void unit_transport_unload_send(struct unit *punit);
-bool unit_move(struct unit *punit, struct tile *ptile, int move_cost,
-               struct unit *embark_to, bool conquer_city_allowed);
+bool unit_move(struct unit *punit, struct tile *pdesttile, int move_cost,
+               struct unit *embark_to, bool find_embark_target,
+               bool conquer_city_allowed);
 bool execute_orders(struct unit *punit, const bool fresh);
 
 bool unit_can_do_action_now(const struct unit *punit);
@@ -168,11 +171,8 @@ void unit_activities_cancel_all_illegal(const struct tile *ptile);
 
 void unit_get_goods(struct unit *punit);
 
+bool unit_order_list_is_sane(int length, const struct unit_order *orders);
 struct unit_order *create_unit_orders(int length,
-                                      const enum unit_orders *orders,
-                                      const enum direction8 *dir,
-                                      const enum unit_activity *activity,
-                                      const int *sub_target,
-                                      const action_id *action);
+                                      const struct unit_order *orders);
 
 #endif  /* FC__UNITTOOLS_H */

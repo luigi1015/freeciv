@@ -96,10 +96,10 @@ static int	  help_history_pos;
 
 
 static const char *help_ilabel_name[6] =
-{ N_("Cost:"), NULL, N_("Upkeep:"), NULL, N_("Requirement:"), NULL };
+{ N_("Base Cost:"), NULL, N_("Upkeep:"), NULL, N_("Requirement:"), NULL };
 
 static const char *help_wlabel_name[6] =
-{ N_("Cost:"), NULL, N_("Requirement:"), NULL, N_("Obsolete by:"), NULL };
+{ N_("Base Cost:"), NULL, N_("Requirement:"), NULL, N_("Obsolete by:"), NULL };
 
 static const char *help_ulabel_name[5][5] =
 {
@@ -689,14 +689,14 @@ static void create_help_dialog(void)
   col = gtk_tree_view_column_new();
 
   rend = gtk_cell_renderer_text_new();
-  g_object_set(rend, "weight", "bold", NULL);
+  g_object_set(rend, "weight", PANGO_WEIGHT_BOLD, NULL);
   gtk_tree_view_column_pack_start(col, rend, TRUE);
   gtk_tree_view_column_set_attributes(col, rend,
 				      "text", 0,
 				      "background-rgba", 3,
 				      NULL);
   rend = gtk_cell_renderer_text_new();
-  g_object_set(rend, "weight", "bold", "xalign", 1.0, NULL);
+  g_object_set(rend, "weight", PANGO_WEIGHT_BOLD, "xalign", 1.0, NULL);
   gtk_tree_view_column_pack_start(col, rend, FALSE);
   gtk_tree_view_column_set_attributes(col, rend,
 				      "text", 1,
@@ -786,7 +786,7 @@ static void set_help_tile_from_terrain(struct terrain *pterr)
   Display updated help about improvement
 **************************************************************************/
 static void help_update_improvement(const struct help_item *pitem,
-				    char *title)
+                                    char *title)
 {
   char buf[8192];
   struct impr_type *imp = improvement_by_translated_name(title);
@@ -797,7 +797,7 @@ static void help_update_improvement(const struct help_item *pitem,
     const char *req = skip_intl_qualifier_prefix(REQ_LABEL_NONE);
     char req_buf[512];
 
-    sprintf(buf, "%d", impr_build_shield_cost(NULL, imp));
+    sprintf(buf, "%d", impr_base_build_shield_cost(imp));
     gtk_label_set_text(GTK_LABEL(help_ilabel[1]), buf);
     sprintf(buf, "%d", imp->upkeep);
     gtk_label_set_text(GTK_LABEL(help_ilabel[3]), buf);
@@ -836,7 +836,7 @@ static void help_update_improvement(const struct help_item *pitem,
   Display updated help about wonder
 **************************************************************************/
 static void help_update_wonder(const struct help_item *pitem,
-			       char *title)
+                               char *title)
 {
   char buf[8192];
   struct impr_type *imp = improvement_by_translated_name(title);
@@ -847,7 +847,7 @@ static void help_update_wonder(const struct help_item *pitem,
     int i;
     char req_buf[512];
 
-    sprintf(buf, "%d", impr_build_shield_cost(NULL, imp));
+    sprintf(buf, "%d", impr_base_build_shield_cost(imp));
     gtk_label_set_text(GTK_LABEL(help_wlabel[1]), buf);
 
     /* FIXME: this should show ranges, negated reqs, and all the
@@ -1250,7 +1250,8 @@ static void help_update_terrain(const struct help_item *pitem,
     if (pterrain->irrigation_result != pterrain
         && pterrain->irrigation_result != T_NONE
         && pterrain->irrigation_time != 0
-        && univs_have_action_enabler(ACTION_CULTIVATE, NULL, &for_terr)) {
+        && action_id_univs_not_blocking(ACTION_CULTIVATE,
+                                        NULL, &for_terr)) {
       fc_snprintf(buf, sizeof(buf),
                   PL_("%d turn", "%d turns", pterrain->irrigation_time),
                   pterrain->irrigation_time);
@@ -1262,7 +1263,7 @@ static void help_update_terrain(const struct help_item *pitem,
     if (pterrain->mining_result != pterrain
         && pterrain->mining_result != T_NONE
         && pterrain->mining_time != 0
-        && univs_have_action_enabler(ACTION_PLANT, NULL, &for_terr)) {
+        && action_id_univs_not_blocking(ACTION_PLANT, NULL, &for_terr)) {
       fc_snprintf(buf, sizeof(buf),
                   PL_("%d turn", "%d turns", pterrain->mining_time),
                   pterrain->mining_time);
@@ -1273,7 +1274,8 @@ static void help_update_terrain(const struct help_item *pitem,
 
     if (pterrain->transform_result != T_NONE
         && pterrain->transform_time != 0
-        && univs_have_action_enabler(ACTION_TRANSFORM_TERRAIN, NULL, &for_terr)) {
+        && action_id_univs_not_blocking(ACTION_TRANSFORM_TERRAIN,
+                                        NULL, &for_terr)) {
       fc_snprintf(buf, sizeof(buf),
                   PL_("%d turn", "%d turns", pterrain->transform_time),
                   pterrain->transform_time);
@@ -1284,12 +1286,12 @@ static void help_update_terrain(const struct help_item *pitem,
 
     if (pterrain->irrigation_result == pterrain
         && pterrain->irrigation_time != 0
-        && univs_have_action_enabler(ACTION_IRRIGATE, NULL, &for_terr)) {
+        && action_id_univs_not_blocking(ACTION_IRRIGATE, NULL, &for_terr)) {
       help_extras_of_act_for_terrain(pterrain, ACTIVITY_IRRIGATE, _("Build as irrigation"));
     }
     if (pterrain->mining_result == pterrain
         && pterrain->mining_time != 0
-        && univs_have_action_enabler(ACTION_MINE, NULL, &for_terr)) {
+        && action_id_univs_not_blocking(ACTION_MINE, NULL, &for_terr)) {
       help_extras_of_act_for_terrain(pterrain, ACTIVITY_MINE, _("Build as mine"));
     }
     if (pterrain->road_time != 0) {

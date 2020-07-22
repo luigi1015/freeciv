@@ -93,11 +93,13 @@ static struct command commands[] = {
              "list ignored users\n"
              "list map image definitions\n"
              "list players\n"
+             "list rulesets\n"
              "list scenarios\n"
              "list nationsets\n"
              "list teams\n"
              "list votes\n"),
    N_("Show a list of various things."),
+   /* TRANS: don't translate text in '' */
    N_("Show a list of:\n"
       " - the player colors,\n"
       " - connections to the server,\n"
@@ -105,6 +107,7 @@ static struct command commands[] = {
       " - your ignore list,\n"
       " - the list of defined map images,\n"
       " - the list of the players in the game,\n"
+      " - the available rulesets (for 'read' command),\n"
       " - the available scenarios,\n"
       " - the available nation sets in this ruleset,\n"
       " - the teams of players or\n"
@@ -511,6 +514,17 @@ static struct command commands[] = {
       "Once the game has started and colors have been assigned, this command "
       "changes the player color in any mode; 'reset' cannot be used.\n"
       "To list the player colors, use 'list colors'."), NULL,
+   CMD_ECHO_NONE, VCF_NONE, 0
+  },
+  {"playernation", ALLOW_ADMIN,
+   /* TRANS: translate text between <> and [] only */
+   N_("playernation <player-name> [nation] [is-male] [leader] [style]"),
+   N_("Define the nation of a player."),
+   N_("This command sets the nation, leader name, style, and gender of a "
+      "specific player.\nThe gender parameter should be 1 if male, "
+      "otherwise 0. Omitting any of the player settings will reset the "
+      "player to defaults.\n"
+      "This command may not be used once the game has started."), NULL,
    CMD_ECHO_NONE, VCF_NONE, 0
   },
   {"endgame",	ALLOW_ADMIN,

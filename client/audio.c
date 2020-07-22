@@ -44,7 +44,7 @@
 #define SNDSPEC_SUFFIX		".soundspec"
 #define MUSICSPEC_SUFFIX        ".musicspec"
 
-#define SOUNDSPEC_CAPSTR "+Freeciv-soundset-Devel-2019-02-28"
+#define SOUNDSPEC_CAPSTR "+Freeciv-3.0-soundset"
 #define MUSICSPEC_CAPSTR "+Freeciv-2.6-musicset"
 
 /* keep it open throughout */
@@ -495,9 +495,9 @@ static int audio_play_music_tag(const char *tag, bool repeat,
 /**********************************************************************//**
   Play an audio sample as suggested by sound tags
 **************************************************************************/
-void audio_play_sound(const char *const tag, char *const alt_tag)
+void audio_play_sound(const char *const tag, const char *const alt_tag)
 {
-  char *pretty_alt_tag = alt_tag ? alt_tag : "(null)";
+  const char *pretty_alt_tag = alt_tag ? alt_tag : "(null)";
 
   if (gui_options.sound_enable_effects) {
     fc_assert_ret(tag != NULL);
@@ -561,7 +561,7 @@ void audio_play_track(const char *const tag, char *const alt_tag)
 /**********************************************************************//**
   Stop sound. Music should die down in a few seconds.
 **************************************************************************/
-void audio_stop()
+void audio_stop(void)
 {
   plugins[selected_plugin].stop();
 }
@@ -569,7 +569,7 @@ void audio_stop()
 /**********************************************************************//**
   Stop looping sound. Music should die down in a few seconds.
 **************************************************************************/
-void audio_stop_usage()
+void audio_stop_usage(void)
 {
   switching_usage = TRUE;
   plugins[selected_plugin].stop();
@@ -578,7 +578,7 @@ void audio_stop_usage()
 /**********************************************************************//**
   Stop looping sound. Music should die down in a few seconds.
 **************************************************************************/
-double audio_get_volume()
+double audio_get_volume(void)
 {
   return plugins[selected_plugin].get_volume();
 }
@@ -594,7 +594,7 @@ void audio_set_volume(double volume)
 /**********************************************************************//**
   Call this at end of program only.
 **************************************************************************/
-void audio_shutdown()
+void audio_shutdown(void)
 {
   /* avoid infinite loop at end of game */
   audio_stop();
@@ -617,7 +617,7 @@ void audio_shutdown()
   Returns a string which list all available plugins. You don't have to
   free the string.
 **************************************************************************/
-const char *audio_get_all_plugin_names()
+const char *audio_get_all_plugin_names(void)
 {
   static char buffer[100];
   int i;

@@ -95,3 +95,64 @@ reqs	=
     { "type", "name", "range"
       "Tech", "Government", "Player"
     }
+
+[effect_capital]
+type    = "Capital_City"
+value	= 1
+reqs	=
+    { "type", "name", "range"
+      "Building", "Throne", "City"
+    }
+
+[effect_throne_infra]
+type    = "Infra_Points"
+value	= 2
+reqs	=
+    { "type", "name", "range"
+      "Building", "Throne", "City"
+    }
+
+[effect_fortified]
+type    = "Fortify_Defense_Bonus"
+value   = 50
+reqs    =
+    { "type", "name", "range"
+      "Activity", "Fortified", "Local"
+    }
+
+[effect_city_fortified]
+type    = "Fortify_Defense_Bonus"
+value   = 50
+reqs    =
+    { "type",          "name",         "range", "present"
+      "CityTile",      "Center",       "Local", TRUE
+      "Activity",      "Fortified",    "Local", FALSE
+      "UnitClassFlag", "CanFortify",   "Local", TRUE
+      "UnitFlag",      "Cant_Fortify", "Local", FALSE
+    }
+
+[effect_action_success_move_cost_from_non_native]
+type    = "Action_Success_Actor_Move_Cost"
+value   = 65535
+reqs    =
+    { "type",      "name",                  "range", "present"
+      "Action",    "Transport Disembark 2", "Local", TRUE
+      "UnitState", "OnNativeTile",          "Local", TRUE
+    }
+
+[effect_no_tools]
+type    = "Output_Bonus"
+value   = -50
+reqs    =
+    { "type",       "name",   "range", "present"
+      "Tech",       "Tools",  "Player", FALSE
+      "OutputType", "Shield", "Local",  TRUE
+    }
+
+[effect_irrigation]
+type    = "Irrigation_Pct"
+value   = 100
+reqs    =
+    { "type", "name", "range"
+      "Extra", "Irrigation", "Local"
+    }

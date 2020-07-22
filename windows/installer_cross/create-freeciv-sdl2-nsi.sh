@@ -1,6 +1,11 @@
 #!/bin/sh
 
-# ./create-freeciv-sdl2-nsi.sh <Freeciv files directory> <version> <win32|win64|win>
+# ./create-freeciv-sdl2-nsi.sh <Freeciv files directory> <version> <win32|win64|win> [unistall setup script]
+
+if test "x$4" != "x" && ! test -x "$4" ; then
+  echo "$4 not an executable script" >&2
+  exit 1
+fi
 
 cat <<EOF
 ; Freeciv Windows installer script
@@ -119,6 +124,7 @@ cat <<EOF
   CreateShortCut "\$SMPROGRAMS\\\$STARTMENU_FOLDER\Freeciv Server.lnk" "\$INSTDIR\freeciv-server.cmd" "\$DefaultLanguageCode" "\$INSTDIR\freeciv-server.exe" 0 SW_SHOWMINIMIZED
   CreateShortCut "\$SMPROGRAMS\\\$STARTMENU_FOLDER\Freeciv Modpack Installer.lnk" "\$INSTDIR\freeciv-mp-gtk3.cmd" "\$DefaultLanguageCode" "\$INSTDIR\freeciv-mp-gtk3.exe" 0 SW_SHOWMINIMIZED
   CreateShortCut "\$SMPROGRAMS\\\$STARTMENU_FOLDER\Freeciv.lnk" "\$INSTDIR\freeciv-sdl2.cmd" "\$DefaultLanguageCode" "\$INSTDIR\freeciv-sdl2.exe" 0 SW_SHOWMINIMIZED
+  CreateShortCut "\$SMPROGRAMS\\\$STARTMENU_FOLDER\Documentation.lnk" "\$INSTDIR\doc\freeciv"
   CreateShortCut "\$SMPROGRAMS\\\$STARTMENU_FOLDER\Uninstall.lnk" "\$INSTDIR\uninstall.exe"
   CreateShortCut "\$SMPROGRAMS\\\$STARTMENU_FOLDER\Website.lnk" "\$INSTDIR\Freeciv.url"
   !insertmacro MUI_STARTMENU_WRITE_END
@@ -311,6 +317,14 @@ do
 echo "  Delete \"\$INSTDIR$name\"" | sed 's,/,\\,g'
 done
 
+find $1 -type l |
+grep -v '/$' |
+sed 's|[^/]*||' |
+while read -r name
+do
+echo "  Delete \"\$INSTDIR$name\"" | sed 's,/,\\,g'
+done
+
 find $1 -depth -type d |
 grep -v '/$' |
 sed 's|[^/]*||' |
@@ -318,6 +332,10 @@ while read -r name
 do
 echo "  RMDir \"\$INSTDIR$name\"" | sed 's,/,\\,g'
 done
+
+if test "x$4" != "x" ; then
+  $4
+fi
 
 cat <<EOF
 

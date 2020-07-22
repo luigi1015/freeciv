@@ -129,7 +129,7 @@ static int help_dlg_window_callback(struct widget *pWindow)
 **************************************************************************/
 static int exit_help_dlg_callback(struct widget *pWidget)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     popdown_help_dialog();
     flush_dirty();
   }
@@ -142,7 +142,7 @@ static int exit_help_dlg_callback(struct widget *pWidget)
 **************************************************************************/
 static int change_gov_callback(struct widget *pWidget)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     popup_gov_info(MAX_ID - pWidget->ID);
   }
 
@@ -161,7 +161,7 @@ void popup_gov_info(int gov)
 **************************************************************************/
 static int change_impr_callback(struct widget *pWidget)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     popup_impr_info(MAX_ID - pWidget->ID);
   }
 
@@ -222,7 +222,7 @@ void popup_impr_info(Impr_type_id impr)
   int h, start_x, start_y, impr_type_count;
   bool created, text = FALSE;
   int scrollbar_width = 0;
-  struct impr_type *pImpr_type;
+  struct impr_type *pimpr_type;
   char buffer[64000];
   SDL_Rect area;
   struct advance *obsTech = NULL;
@@ -365,28 +365,29 @@ void popup_impr_info(Impr_type_id impr)
     }
   }
 
-  pImpr_type = improvement_by_number(impr);
+  pimpr_type = improvement_by_number(impr);
 
-  pSurf = get_building_surface(pImpr_type);
+  pSurf = get_building_surface(pimpr_type);
   pImprNameLabel = create_iconlabel_from_chars(
                      ResizeSurfaceBox(pSurf, adj_size(64), adj_size(48), 1, TRUE, TRUE),
-                     pWindow->dst, city_improvement_name_translation(NULL, pImpr_type),
+                     pWindow->dst, city_improvement_name_translation(NULL, pimpr_type),
                      adj_font(24), WF_FREE_THEME);
 
   pImprNameLabel->ID = ID_LABEL;
   DownAdd(pImprNameLabel, pDock);
   pDock = pImprNameLabel;
 
-  if (!improvement_has_flag(pImpr_type, IF_GOLD)) {
-    sprintf(buffer, "%s %d", _("Cost:"), impr_build_shield_cost(NULL, pImpr_type));
+  if (!improvement_has_flag(pimpr_type, IF_GOLD)) {
+    sprintf(buffer, "%s %d", _("Base Cost:"),
+            impr_base_build_shield_cost(pimpr_type));
     pCostLabel = create_iconlabel_from_chars(NULL, pWindow->dst,
                                              buffer, adj_font(12), 0);
     pCostLabel->ID = ID_LABEL;
     DownAdd(pCostLabel, pDock);
     pDock = pCostLabel;
 
-    if (!is_wonder(pImpr_type)) {
-      sprintf(buffer, "%s %d", _("Upkeep:"), pImpr_type->upkeep);
+    if (!is_wonder(pimpr_type)) {
+      sprintf(buffer, "%s %d", _("Upkeep:"), pimpr_type->upkeep);
       pUpkeepLabel = create_iconlabel_from_chars(NULL, pWindow->dst,
                                                  buffer, adj_font(12), 0);
       pUpkeepLabel->ID = ID_LABEL;
@@ -403,7 +404,7 @@ void popup_impr_info(Impr_type_id impr)
   DownAdd(pRequirementLabel, pDock);
   pDock = pRequirementLabel;
 
-  if (requirement_vector_size(&pImpr_type->reqs) == 0) {
+  if (requirement_vector_size(&pimpr_type->reqs) == 0) {
     pRequirementLabel2 = create_iconlabel_from_chars(NULL, pWindow->dst,
                                                      Q_("?req:None"),
                                                      adj_font(12), 0);
@@ -413,7 +414,7 @@ void popup_impr_info(Impr_type_id impr)
      * MAX_NUM_REQS reqs.
      * Currently it's limited to 1 req. Remember MAX_NUM_REQS is a compile-time
      * definition. */
-    requirement_vector_iterate(&pImpr_type->reqs, preq) {
+    requirement_vector_iterate(&pimpr_type->reqs, preq) {
       if (!preq->present) {
         continue;
       }
@@ -443,7 +444,7 @@ void popup_impr_info(Impr_type_id impr)
   pDock = pObsoleteByLabel;
 
 
-  requirement_vector_iterate(&pImpr_type->obsolete_by, pobs) {
+  requirement_vector_iterate(&pimpr_type->obsolete_by, pobs) {
     if (pobs->source.kind == VUT_ADVANCE) {
       obsTech = pobs->source.value.advance;
       break;
@@ -470,7 +471,8 @@ void popup_impr_info(Impr_type_id impr)
   start_x = (area.x + 1 + scrollbar_width + pHelpDlg->pEndActiveWidgetList->size.w + adj_size(20));
 
   buffer[0] = '\0';
-  helptext_building(buffer, sizeof(buffer), client.conn.playing, NULL, pImpr_type);
+  helptext_building(buffer, sizeof(buffer), client.conn.playing, NULL,
+                    pimpr_type);
   if (buffer[0] != '\0') {
     utf8_str *bstr = create_utf8_from_char(buffer, adj_font(12));
 
@@ -527,10 +529,10 @@ void popup_impr_info(Impr_type_id impr)
 
   start_y = pImprNameLabel->size.y + pImprNameLabel->size.h + adj_size(10);
 
-  if (!improvement_has_flag(pImpr_type, IF_GOLD)) {
+  if (!improvement_has_flag(pimpr_type, IF_GOLD)) {
     pCostLabel = pImprNameLabel->prev;
     widget_set_position(pCostLabel, start_x, start_y);
-    if (!is_wonder(pImpr_type)) {
+    if (!is_wonder(pimpr_type)) {
       pUpkeepLabel = pCostLabel->prev;
       widget_set_position(pUpkeepLabel,
                           pCostLabel->size.x + pCostLabel->size.w + adj_size(20),
@@ -575,7 +577,7 @@ void popup_impr_info(Impr_type_id impr)
 **************************************************************************/
 static int change_unit_callback(struct widget *pWidget)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     popup_unit_info(MAX_ID - pWidget->ID);
   }
 
@@ -882,7 +884,7 @@ void popup_unit_info(Unit_type_id type_id)
                                                     adj_font(12), 0);
     pObsoleteByLabel2->ID = ID_LABEL;
   } else {
-    struct unit_type *utype = pUnitType->obsoleted_by;
+    const struct unit_type *utype = pUnitType->obsoleted_by;
 
     pObsoleteByLabel2 = create_iconlabel_from_chars(NULL, pWindow->dst,
                                                     utype_name_translation(utype),
@@ -1000,7 +1002,7 @@ void popup_unit_info(Unit_type_id type_id)
 **************************************************************************/
 static int change_tech_callback(struct widget *pWidget)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     popup_tech_info(MAX_ID - pWidget->ID);
   }
 
@@ -1012,7 +1014,7 @@ static int change_tech_callback(struct widget *pWidget)
 **************************************************************************/
 static int show_tech_tree_callback(struct widget *pWidget)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     struct TECHS_BUTTONS *pStore = (struct TECHS_BUTTONS *)pHelpDlg->pEndWidgetList->data.ptr;
 
     pStore->show_tree = !pStore->show_tree;
@@ -1269,7 +1271,9 @@ static struct widget *create_tech_info(Tech_type_id tech, int width,
   } unit_type_iterate_end;
 
   buffer[0] = '\0';
-  helptext_advance(buffer, sizeof(buffer), client.conn.playing, "", tech);
+  if (tech != A_NONE) {
+    helptext_advance(buffer, sizeof(buffer), client.conn.playing, "", tech);
+  }
   if (buffer[0] != '\0') {
     utf8_str *pstr = create_utf8_from_char(buffer, adj_font(12));
 
@@ -1622,7 +1626,7 @@ static void redraw_tech_tree_dlg(void)
 **************************************************************************/
 static int toggle_full_tree_mode_in_help_dlg_callback(struct widget *pWidget)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     struct TECHS_BUTTONS *pStore = (struct TECHS_BUTTONS *)pHelpDlg->pEndWidgetList->data.ptr;
 
     if (pStore->show_full_tree) {

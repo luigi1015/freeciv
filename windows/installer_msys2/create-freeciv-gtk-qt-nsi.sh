@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# ./create-freeciv-gtk-qt-nsi.sh <Freeciv files directory> <version> <gtk2|gtk3|gtk3.22|qt> <GTK+2|GTK+3|Qt> <win32|win64|win> [mp gui]
+# ./create-freeciv-gtk-qt-nsi.sh <Freeciv files directory> <version> <gtk3|gtk3.22|qt> <GTK+3|Qt> <win32|win64|win> [mp gui]
 
 if test "x$6" != "x" ; then
   MPGUI_ID="$6"
@@ -124,6 +124,7 @@ fi
 
 cat <<EOF
 
+  CreateShortCut "\$SMPROGRAMS\\\$STARTMENU_FOLDER\Documentation.lnk" "\$INSTDIR\doc\freeciv"
   CreateShortCut "\$SMPROGRAMS\\\$STARTMENU_FOLDER\Uninstall.lnk" "\$INSTDIR\uninstall.exe"
   CreateShortCut "\$SMPROGRAMS\\\$STARTMENU_FOLDER\Website.lnk" "\$INSTDIR\Freeciv.url"
   !insertmacro MUI_STARTMENU_WRITE_END
@@ -178,6 +179,7 @@ EOF
 
 cat ../../bootstrap/langstat_core.txt |
 sort -k 1 |
+iconv -f UTF-8 -t ISO-8859-1 |
 while read -r code prct name
 do
 if test -e $1/share/locale/$code/LC_MESSAGES/freeciv-core.mo; then
@@ -238,6 +240,7 @@ EOF
 
   cat ../../bootstrap/langstat_core.txt |
   sort -k 1 |
+  iconv -f UTF-8 -t ISO-8859-1 |
   while read -r code prct name
   do
   if test -e $1/share/locale/$code/LC_MESSAGES/freeciv-core.mo; then
@@ -261,6 +264,7 @@ EOF
   echo "  \${EndIf}"
 
   cat ../../bootstrap/langstat_core.txt |
+  iconv -f UTF-8 -t ISO-8859-1 |
   while read -r code prct name
   do
     echo "  \${If} \$LangName == \"$name ($code) $prct\""

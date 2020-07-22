@@ -27,6 +27,7 @@
 #include <QPainter>
 #include <QRadioButton>
 #include <QRect>
+#include <QScreen>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSplitter>
@@ -275,19 +276,19 @@ void progress_bar::paintEvent(QPaintEvent *event)
     p.setCompositionMode(QPainter::CompositionMode_ColorDodge);
     QFontMetrics fm(*sfont);
 
-    if (fm.width(s1) > rx.width()) {
+    if (fm.horizontalAdvance(s1) > rx.width()) {
       s1 = fm.elidedText(s1, Qt::ElideRight, rx.width());
     }
 
-    i = rx.width() - fm.width(s1) + pix_width;
+    i = rx.width() - fm.horizontalAdvance(s1) + pix_width;
     i = qMax(0, i);
     p.drawText(i / 2, j / 3 + f_size, s1);
 
-    if (fm.width(s2) > rx.width()) {
+    if (fm.horizontalAdvance(s2) > rx.width()) {
       s2 = fm.elidedText(s2, Qt::ElideRight, rx.width());
     }
 
-    i = rx.width() - fm.width(s2) + pix_width;
+    i = rx.width() - fm.horizontalAdvance(s2) + pix_width;
     i = qMax(0, i);
 
     p.drawText(i / 2, height() - j / 3, s2);
@@ -299,11 +300,11 @@ void progress_bar::paintEvent(QPaintEvent *event)
     p.setCompositionMode(QPainter::CompositionMode_ColorDodge);
     QFontMetrics fm(*sfont);
 
-    if (fm.width(s) > rx.width()) {
+    if (fm.horizontalAdvance(s) > rx.width()) {
       s = fm.elidedText(s, Qt::ElideRight, rx.width());
     }
 
-    i = rx.width() - fm.width(s) + pix_width;
+    i = rx.width() - fm.horizontalAdvance(s) + pix_width;
     i = qMax(0, i);
     p.drawText(i / 2, j / 2 + f_size, s);
   }
@@ -354,7 +355,7 @@ static void pixmap_put_x(QPixmap *pix)
 /************************************************************************//**
   Improvement item constructor
 ****************************************************************************/
-impr_item::impr_item(QWidget *parent, impr_type *building,
+impr_item::impr_item(QWidget *parent, const impr_type *building,
                      struct city *city): QLabel(parent)
 {
   setParent(parent);
@@ -588,17 +589,19 @@ void impr_item::wheelEvent(QWheelEvent *event)
 ****************************************************************************/
 void impr_item::mouseDoubleClickEvent(QMouseEvent *event)
 {
-  hud_message_box ask(city_dlg);
+  hud_message_box *ask;
   QString s;
   char buf[256];
   int price;
-  int ret;
+  const int impr_id = improvement_number(impr);
+  const int city_id = pcity->id;
 
   if (!can_client_issue_orders()) {
     return;
   }
 
   if (event->button() == Qt::LeftButton) {
+    ask = new hud_message_box(city_dlg);
     if (test_player_sell_building_now(client.conn.playing, pcity,
                                       impr) != TR_SUCCESS) {
       return;
@@ -610,19 +613,17 @@ void impr_item::mouseDoubleClickEvent(QMouseEvent *event)
                     "Sell %s for %d gold?", price),
                 city_improvement_name_translation(pcity, impr), price);
 
-    s = QString(buf);
-    ask.set_text_title(s, (_("Sell improvement?")));
-    ask.setStandardButtons(QMessageBox::Cancel | QMessageBox::Ok);
-    ret = ask.exec();
-
-    switch (ret) {
-    case QMessageBox::Cancel:
-      return;
-
-    case QMessageBox::Ok:
-      city_sell_improvement(pcity, improvement_number(impr));
-      break;
-    }
+    ask->set_text_title(buf, (_("Sell improvement?")));
+    ask->setStandardButtons(QMessageBox::Cancel | QMessageBox::Ok);
+    ask->setAttribute(Qt::WA_DeleteOnClose);
+    connect(ask, &hud_message_box::accepted, [=]() {
+      struct city *pcity = game_city_by_number(city_id);
+      if (!pcity) {
+        return;
+      }
+      city_sell_improvement(pcity, impr_id);
+    });
+    ask->show();
   }
 }
 
@@ -679,7 +680,7 @@ unit_item::unit_item(QWidget *parent, struct unit *punit,
   img = unit_pixmap->map_pixmap.toImage();
   crop = zealous_crop_rect(img);
   cropped_img = img.copy(crop);
-  if (tileset_is_isometric(tileset) == true) {
+  if (tileset_is_isometric(tileset)) {
     unit_img = cropped_img.scaledToHeight(tileset_unit_width(get_tileset())
                                           * isosize, Qt::SmoothTransformation);
   } else {
@@ -1304,23 +1305,21 @@ void city_map::mousePressEvent(QMouseEvent *event)
 void city_map::context_menu(QPoint point)
 {
   int canvas_x, canvas_y, city_x, city_y;
-  QAction *act;
-  QAction con_clear(_("Clear"), this);
-  QAction con_irrig_tf(_("Irrigate"), this);
-  QAction con_irrig(_("Irrigate"), this);
-  QAction con_mine_tf(_("Plant"), this);
-  QAction con_mine(_("Mine"), this);
-  QAction con_road(_("Road"), this);
-  QAction con_trfrm(_("Transform"), this);
-  QAction con_pollution(_("Clean Pollution"), this);
-  QAction con_fallout(_("Clean Fallout"), this);
-  QMenu con_menu(this);
+  QAction *con_irrig_tf = nullptr;
+  QAction *con_irrig = nullptr;
+  QAction *con_mine_tf = nullptr;
+  QAction *con_mine = nullptr;
+  QAction *con_road = nullptr;
+  QAction *con_trfrm = nullptr;
+  QAction *con_pollution = nullptr;
+  QAction *con_fallout = nullptr;
+  QMenu *con_menu;
   QWidgetAction *wid_act;
-  struct packet_worker_task task;
   struct terrain *pterr;
   struct tile *ptile;
   struct universal for_terr;
   struct worker_task *ptask;
+  int city_id = mcity->id;
 
   if (!can_client_issue_orders()) {
     return;
@@ -1336,7 +1335,6 @@ void city_map::context_menu(QPoint point)
 
   ptile = city_map_to_tile(mcity->tile, city_map_radius_sq_get(mcity),
                            city_x, city_y);
-  task.city_id = mcity->id;
   pterr = tile_terrain(ptile);
   for_terr.kind = VUT_TERRAIN;
   for_terr.value.terrain = pterr;
@@ -1344,71 +1342,82 @@ void city_map::context_menu(QPoint point)
 
   wid_act = new QWidgetAction(this);
   wid_act->setDefaultWidget(new QLabel(_("Autosettler activity:")));
-  con_menu.addAction(wid_act);
+
+  con_menu = new QMenu(this);
+  con_menu->addAction(wid_act);
 
   if (pterr->mining_result != pterr && pterr->mining_result != NULL
-      && univs_have_action_enabler(ACTION_PLANT, NULL, &for_terr)) {
-    con_menu.addAction(&con_mine_tf);
+      && action_id_univs_not_blocking(ACTION_PLANT, NULL, &for_terr)) {
+    con_menu->addAction(_("Plant"));
   } else if (pterr->mining_result == pterr
-             && univs_have_action_enabler(ACTION_MINE, NULL, &for_terr)) {
-    con_menu.addAction(&con_mine);
+             && action_id_univs_not_blocking(ACTION_MINE,
+                                             NULL, &for_terr)) {
+    con_menu->addAction(_("Mine"));
   }
 
   if (pterr->irrigation_result != pterr && pterr->irrigation_result != NULL
-      && univs_have_action_enabler(ACTION_CULTIVATE, NULL, &for_terr)) {
-    con_menu.addAction(&con_irrig_tf);
+      && action_id_univs_not_blocking(ACTION_CULTIVATE, NULL, &for_terr)) {
+    con_menu->addAction(_("Irrigate"));
   } else if (pterr->irrigation_result == pterr
-             && univs_have_action_enabler(ACTION_IRRIGATE, NULL, &for_terr)) {
-    con_menu.addAction(&con_irrig);
+             && action_id_univs_not_blocking(ACTION_IRRIGATE,
+                                             NULL, &for_terr)) {
+    con_menu->addAction(_("Irrigate"));
   }
 
   if (pterr->transform_result != pterr && pterr->transform_result != NULL
-      && univs_have_action_enabler(ACTION_TRANSFORM_TERRAIN, NULL, &for_terr)) {
-    con_menu.addAction(&con_trfrm);
+      && action_id_univs_not_blocking(ACTION_TRANSFORM_TERRAIN,
+                                      NULL, &for_terr)) {
+    con_menu->addAction(_("Transform"));
   }
 
   if (next_extra_for_tile(ptile, EC_ROAD, city_owner(mcity), NULL) != NULL) {
-    con_menu.addAction(&con_road);
+    con_menu->addAction(_("Road"));
   }
 
   if (prev_extra_in_tile(ptile, ERM_CLEANPOLLUTION,
                          city_owner(mcity), NULL) != NULL) {
-    con_menu.addAction(&con_pollution);
+    con_menu->addAction(_("Clean Pollution"));
   }
 
   if (prev_extra_in_tile(ptile, ERM_CLEANFALLOUT,
                          city_owner(mcity), NULL) != NULL) {
-    con_menu.addAction(&con_fallout);
+    con_fallout = con_menu->addAction(_("Clean Fallout"));
   }
 
   if (ptask != NULL) {
-    con_menu.addAction(&con_clear);
+    con_menu->addAction(_("Clear"));
   }
 
-  act = con_menu.exec(mapToGlobal(point));
+  con_menu->setAttribute(Qt::WA_DeleteOnClose);
+  connect(con_menu, &QMenu::triggered, [=](QAction *act) {
+    bool target = false;
+    struct packet_worker_task task;
 
-  if (act) {
-    bool target = FALSE;
+    if (!act) {
+      return;
+    }
 
-    if (act == &con_road) {
+    task.city_id = city_id;
+
+    if (act == con_road) {
       task.activity = ACTIVITY_GEN_ROAD;
       target = TRUE;
-    } else if (act == &con_mine) {
+    } else if (act == con_mine) {
       task.activity = ACTIVITY_MINE;
       target = TRUE;
-    } else if (act == &con_mine_tf) {
+    } else if (act == con_mine_tf) {
       task.activity = ACTIVITY_MINE;
-    } else if (act == &con_irrig) {
+    } else if (act == con_irrig) {
       task.activity = ACTIVITY_IRRIGATE;
       target = TRUE;
-    } else if (act == &con_irrig_tf) {
+    } else if (act == con_irrig_tf) {
       task.activity = ACTIVITY_IRRIGATE;
-    } else if (act == &con_trfrm) {
+    } else if (act == con_trfrm) {
       task.activity = ACTIVITY_TRANSFORM;
-    } else if (act == &con_pollution) {
+    } else if (act == con_pollution) {
       task.activity = ACTIVITY_POLLUTION;
       target = TRUE;
-    } else if (act == &con_fallout) {
+    } else if (act == con_fallout) {
       task.activity = ACTIVITY_FALLOUT;
       target = TRUE;
     }
@@ -1439,7 +1448,9 @@ void city_map::context_menu(QPoint point)
 
     task.tile_id = ptile->index;
     send_packet_worker_task(&client.conn, &task);
-  }
+  });
+
+  con_menu->popup(mapToGlobal(point));
 }
 
 /************************************************************************//**
@@ -1471,7 +1482,7 @@ city_dialog::city_dialog(QWidget *parent): qfc_dialog(parent)
           *supp_unit_wdg,  *curr_impr_wdg;;
 
   int h = 2 * fm.height() + 2;
-  small_font = fc_font::instance()->get_font(fonts::city_label);
+  small_font = fc_font::instance()->get_font(fonts::notify_label);
   zoom = 1.0;
 
   happines_shown = false;
@@ -1505,21 +1516,21 @@ city_dialog::city_dialog(QWidget *parent): qfc_dialog(parent)
   info_list << _("Food:") << _("Prod:") << _("Trade:") << _("Gold:")
             << _("Luxury:") << _("Science:") << _("Granary:")
             << _("Change in:") << _("Corruption:") << _("Waste:")
-            << _("Culture:") << _("Pollution:") << _("Plague Risk:")
-            << _("Tech Stolen:");
+            << _("Culture:") << _("Pollution:") << _("Plague risk:")
+            << _("Tech Stolen:") << _("Airlift:");
   info_nr = info_list.count();
   info_wdg->setFont(*small_font);
   info_grid_layout->setSpacing(0);
-  info_grid_layout->setMargin(0);
+  info_grid_layout->setContentsMargins(0, 0, 0, 0);
 
   for (iter = 0; iter < info_nr; iter++) {
     ql = new QLabel(info_list[iter], info_wdg);
     ql->setFont(*small_font);
-    ql->setProperty(fonts::city_label, "true");
+    ql->setProperty(fonts::notify_label, "true");
     info_grid_layout->addWidget(ql, iter, 0);
     qlt[iter] = new QLabel(info_wdg);
     qlt[iter]->setFont(*small_font);
-    qlt[iter]->setProperty(fonts::city_label, "true");
+    qlt[iter]->setProperty(fonts::notify_label, "true");
     info_grid_layout->addWidget(qlt[iter], iter, 1);
     info_grid_layout->setRowStretch(iter, 0);
   }
@@ -1818,7 +1829,7 @@ city_dialog::city_dialog(QWidget *parent): qfc_dialog(parent)
     gridl->addWidget(lab_table[i], i, 1, 1, 1);
     lab2 = new QLabel(this);
     lab2->setFont(*small_font);
-    lab2->setProperty(fonts::city_label, "true");
+    lab2->setProperty(fonts::notify_label, "true");
     lab2->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     lab2->setText(info_list.at(i));
     gridl->addWidget(lab2, i, 0, 1, 1);
@@ -1878,11 +1889,11 @@ city_dialog::city_dialog(QWidget *parent): qfc_dialog(parent)
   str_list << _("Food") << _("Shield") << _("Trade") << _("Gold")
            << _("Luxury") << _("Science") << _("Celebrate");
   some_label = new QLabel(_("Minimal Surplus"));
-  some_label->setFont(*fc_font::instance()->get_font(fonts::city_label));
+  some_label->setFont(*fc_font::instance()->get_font(fonts::notify_label));
   some_label->setAlignment(Qt::AlignRight);
   slider_grid->addWidget(some_label, 0, 0, 1, 3);
   some_label = new QLabel(_("Priority"));
-  some_label->setFont(*fc_font::instance()->get_font(fonts::city_label));
+  some_label->setFont(*fc_font::instance()->get_font(fonts::notify_label));
   some_label->setAlignment(Qt::AlignCenter);
   slider_grid->addWidget(some_label, 0, 3, 1, 2);
 
@@ -2041,10 +2052,10 @@ void city_dialog::change_production(bool next)
 ****************************************************************************/
 void city_dialog::update_happiness_button()
 {
-  if (happines_shown == false) {
-    happiness_button->setToolTip(_("Show happiness information"));
-  } else {
+  if (happines_shown) {
     happiness_button->setToolTip(_("Show city production"));
+  } else {
+    happiness_button->setToolTip(_("Show happiness information"));
   }
 }
 
@@ -2055,7 +2066,7 @@ void city_dialog::show_happiness()
 {
   setUpdatesEnabled(false);
 
-  if (happines_shown == false) {
+  if (!happines_shown) {
     leftbot_layout->replaceWidget(prod_unit_splitter,
                                   happiness_widget,
                                   Qt::FindDirectChildrenOnly);
@@ -2180,13 +2191,15 @@ void city_dialog::hideEvent(QHideEvent *event)
 ****************************************************************************/
 void city_dialog::showEvent(QShowEvent *event)
 {
-  if (gui()->qt_settings.city_geometry.isNull() == false) {
+  if (!gui()->qt_settings.city_geometry.isNull()) {
     restoreGeometry(gui()->qt_settings.city_geometry);
     prod_unit_splitter->restoreState(gui()->qt_settings.city_splitter1);
     central_left_splitter->restoreState(gui()->qt_settings.city_splitter2);
     central_splitter->restoreState(gui()->qt_settings.city_splitter3);
   } else {
-    QRect rect = QApplication::desktop()->screenGeometry();
+    QList<QScreen *> screens = QGuiApplication::screens();
+    QRect rect = screens[0]->availableGeometry();
+
     resize((rect.width() * 4) / 5, (rect.height() * 5) / 6);
   }
 }
@@ -2244,17 +2257,29 @@ bool city_dialog::eventFilter(QObject *obj, QEvent *event)
 ****************************************************************************/
 void city_dialog::city_rename()
 {
-  hud_input_box ask(gui()->central_wdg);
+  hud_input_box *ask;
+  const int city_id = pcity->id;
 
   if (!can_client_issue_orders()) {
     return;
   }
 
-  ask.set_text_title_definput(_("What should we rename the city to?"),
-                              _("Rename City"), city_name_get(pcity));
-  if (ask.exec() == QDialog::Accepted) {
-    ::city_rename(pcity, ask.input_edit.text().toLocal8Bit().data());
-  }
+  ask = new hud_input_box(gui()->central_wdg);
+  ask->set_text_title_definput(_("What should we rename the city to?"),
+                               _("Rename City"), city_name_get(pcity));
+  ask->setAttribute(Qt::WA_DeleteOnClose);
+  connect(ask, &hud_message_box::accepted, this, [=]() {
+    struct city *pcity = game_city_by_number(city_id);
+    QByteArray ask_bytes;
+
+    if (!pcity) {
+      return;
+    }
+
+    ask_bytes = ask->input_edit.text().toLocal8Bit();
+    ::city_rename(pcity, ask_bytes.data());
+  });
+  ask->show();
 }
 
 /************************************************************************//**
@@ -2288,15 +2313,16 @@ void city_dialog::zoom_out()
 ****************************************************************************/
 void city_dialog::save_cma()
 {
-  struct cm_parameter param;
-  QString text;
-  hud_input_box ask(gui()->central_wdg);
+  hud_input_box *ask = new hud_input_box(gui()->central_wdg);
 
-  ask.set_text_title_definput(_("What should we name the preset?"),
-                              _("Name new preset"),
-                              _("new preset"));
-  if (ask.exec() == QDialog::Accepted) {
-    text = ask.input_edit.text().toLocal8Bit().data();
+  ask->set_text_title_definput(_("What should we name the preset?"),
+                               _("Name new preset"),
+                               _("new preset"));
+  ask->setAttribute(Qt::WA_DeleteOnClose);
+  connect(ask, &hud_message_box::accepted, this, [=]() {
+    struct cm_parameter param;
+    QByteArray ask_bytes = ask->input_edit.text().toLocal8Bit();
+    QString text = ask_bytes.data();
     if (!text.isEmpty()) {
       param.allow_disorder = false;
       param.allow_specialists = true;
@@ -2308,10 +2334,12 @@ void city_dialog::save_cma()
         param.factor[i] = slider_tab[2 * i + 1]->value();
       }
 
-      cmafec_preset_add(text.toLocal8Bit().data(), &param);
+      ask_bytes = text.toLocal8Bit();
+      cmafec_preset_add(ask_bytes.data(), &param);
       update_cma_tab();
     }
-  }
+  });
+  ask->show();
 }
 
 /************************************************************************//**
@@ -2408,7 +2436,7 @@ void city_dialog::update_sliders()
   QVariant qvar;
   QLabel *label;
 
-  if (cma_is_city_under_agent(pcity, &param) == false) {
+  if (!cma_is_city_under_agent(pcity, &param)) {
     if (cma_table->currentRow() == -1 || cmafec_preset_num() == 0) {
       return;
     }
@@ -2483,7 +2511,8 @@ void city_dialog::update_cma_tab()
     cma_result_pix->setPixmap(pix);
     cma_result_pix->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     /* TRANS: %1 is custom string chosen by player */
-    cma_result->setText(QString(_("<h3>Governor Enabled<br>(%1)</h3>")).arg(s));
+    cma_result->setText(QString(_("<h3>Governor Enabled<br>(%1)</h3>"))
+                        .arg(s.toHtmlEscaped()));
     cma_result->setAlignment(Qt::AlignCenter);
   } else {
     pix = style()->standardPixmap(QStyle::SP_DialogCancelButton);
@@ -2518,8 +2547,7 @@ void city_dialog::update_cma_tab()
 void city_dialog::cma_remove()
 {
   int i;
-  hud_message_box ask(city_dlg);
-  int ret;
+  hud_message_box *ask;
 
   i = cma_table->currentRow();
 
@@ -2527,20 +2555,16 @@ void city_dialog::cma_remove()
     return;
   }
 
-  ask.set_text_title(_("Remove this preset?"), cmafec_preset_get_descr(i));
-  ask.setStandardButtons(QMessageBox::Cancel | QMessageBox::Ok);
-  ask.setDefaultButton(QMessageBox::Cancel);
-  ret = ask.exec();
-
-  switch (ret) {
-  case QMessageBox::Cancel:
-    return;
-
-  case QMessageBox::Ok:
+  ask = new hud_message_box(city_dlg);
+  ask->set_text_title(_("Remove this preset?"), cmafec_preset_get_descr(i));
+  ask->setStandardButtons(QMessageBox::Cancel | QMessageBox::Ok);
+  ask->setDefaultButton(QMessageBox::Cancel);
+  ask->setAttribute(Qt::WA_DeleteOnClose);
+  connect(ask, &hud_message_box::accepted, this, [=]() {
     cmafec_preset_remove(i);
     update_cma_tab();
-    break;
-  }
+  });
+  ask->show();
 }
 
 /************************************************************************//**
@@ -2580,17 +2604,17 @@ void city_dialog::cma_slider(int value)
 }
 
 /************************************************************************//**
-  Received signal about changed qcheckbox - disband at size 1
+  Received signal about changed qcheckbox - allow disbanding city
 ****************************************************************************/
-void city_dialog::disband_state_changed(int state)
+void city_dialog::disband_state_changed(bool allow_disband)
 {
   bv_city_options new_options;
 
   BV_CLR_ALL(new_options);
 
-  if (state == Qt::Checked) {
+  if (allow_disband) {
     BV_SET(new_options, CITYO_DISBAND);
-  } else if (state == Qt::Unchecked) {
+  } else {
     BV_CLR(new_options, CITYO_DISBAND);
   }
 
@@ -2604,17 +2628,18 @@ void city_dialog::disband_state_changed(int state)
 ****************************************************************************/
 void city_dialog::cma_context_menu(const QPoint &p)
 {
-  QMenu cma_menu(this);
+  QMenu *cma_menu = new QMenu(this);
   QAction *cma_del_item;
-  QAction *act;
 
-  cma_del_item = cma_menu.addAction(_("Remove Governor"));
-  act = cma_menu.exec(QCursor::pos());
+  cma_menu->setAttribute(Qt::WA_DeleteOnClose);
+  cma_del_item = cma_menu->addAction(_("Remove Governor"));
+  connect(cma_menu, &QMenu::triggered, this, [=](QAction *act) {
+    if (act == cma_del_item) {
+      cma_remove();
+    }
+  });
 
-  if (act == cma_del_item) {
-    cma_remove();
-  }
-
+  cma_menu->popup(QCursor::pos());
 }
 
 /************************************************************************//**
@@ -2622,31 +2647,27 @@ void city_dialog::cma_context_menu(const QPoint &p)
 ****************************************************************************/
 void city_dialog::display_worklist_menu(const QPoint &p)
 {
-  bool worklist_defined = true;
-  cid c_id;
-  int which_menu;
-  QAction *act;
   QAction *action;
   QAction *disband;
   QAction *wl_save;
-  QAction wl_clear(_("Clear"), 0);
-  QAction wl_empty(_("(no worklists defined)"), 0);
+  QAction *wl_clear;
+  QAction *wl_empty;
   QMap<QString, cid> list;
   QMap<QString, cid>::const_iterator map_iter;
-  QMenu *add_menu;
+  QMenu *change_menu;
   QMenu *insert_menu;
-  QMenu list_menu(this);
+  QMenu *list_menu;
   QMenu *options_menu;
-  QVariant qvar;
+  int city_id = pcity->id;
 
   if (!can_client_issue_orders()) {
     return;
   }
-
-  add_menu = list_menu.addMenu(_("Change worklist"));
-  insert_menu = list_menu.addMenu(_("Insert worklist"));
-  connect(&wl_clear, &QAction::triggered, this, &city_dialog::clear_worklist);
-  list_menu.addAction(&wl_clear);
+  list_menu = new QMenu(this);
+  change_menu = list_menu->addMenu(_("Change worklist"));
+  insert_menu = list_menu->addMenu(_("Insert worklist"));
+  wl_clear = list_menu->addAction(_("Clear"));
+  connect(wl_clear, &QAction::triggered, this, &city_dialog::clear_worklist);
   list.clear();
 
   global_worklists_iterate(pgwl) {
@@ -2654,69 +2675,60 @@ void city_dialog::display_worklist_menu(const QPoint &p)
   } global_worklists_iterate_end;
 
   if (list.count() == 0) {
-    add_menu->addAction(&wl_empty);
-    insert_menu->addAction(&wl_empty);
-    worklist_defined = false;
+    wl_empty = change_menu->addAction(_("(no worklists defined)"));
+    insert_menu->addAction(wl_empty);
   }
 
   map_iter = list.constBegin();
 
   while (map_iter != list.constEnd()) {
-    action = add_menu->addAction(map_iter.key());
+    action = change_menu->addAction(map_iter.key());
     action->setData(map_iter.value());
-    action->setProperty("FC", 1);
+
     action = insert_menu->addAction(map_iter.key());
     action->setData(map_iter.value());
-    action->setProperty("FC", 2);
+
     map_iter++;
   }
 
-  wl_save = list_menu.addAction(_("Save worklist"));
-  options_menu = list_menu.addMenu(_("Options"));
-  disband = options_menu->addAction(_("Disband at size 1"));
+  wl_save = list_menu->addAction(_("Save worklist"));
+  connect(wl_save, &QAction::triggered, this, &city_dialog::save_worklist);
+  options_menu = list_menu->addMenu(_("Options"));
+  disband = options_menu->addAction(_("Allow disbanding city"));
   disband->setCheckable(true);
   disband->setChecked(is_city_option_set(pcity, CITYO_DISBAND));
+  connect(disband, &QAction::triggered, this,
+          &city_dialog::disband_state_changed);
 
-  act = 0;
-  act = list_menu.exec(QCursor::pos());
+  connect(change_menu, &QMenu::triggered, this, [=](QAction *act) {
+    QVariant id = act->data();
+    struct city *pcity = game_city_by_number(city_id);
+    const struct worklist *worklist;
 
-  if (act) {
-    if (act == disband) {
-      int state;
-
-      if (disband->isChecked()) {
-        state = Qt::Checked;
-      } else {
-        state = Qt::Unchecked;
-      }
-
-      disband_state_changed(state);
-    }
-    if (act == wl_save) {
-      save_worklist();
-      return;
-    }
-    qvar = act->property("FC");
-
-    if (!qvar.isValid() || qvar.isNull() || !worklist_defined) {
+    if (!pcity) {
       return;
     }
 
-    which_menu = qvar.toInt();
-    qvar = act->data();
-    c_id = qvar.toInt();
+    fc_assert_ret(id.type() == QVariant::Int);
+    worklist = global_worklist_get(global_worklist_by_id(id.toInt()));
+    city_set_queue(pcity, worklist);
+  });
 
-    if (which_menu == 1) { /* Change Worklist */
-      city_set_queue(pcity,
-                     global_worklist_get(global_worklist_by_id(c_id)));
-    } else if (which_menu == 2) { /* Insert Worklist */
-      if (worklist_defined) {
-        city_queue_insert_worklist(pcity, selected_row_p + 1,
-                                   global_worklist_get(global_worklist_by_id(
-                                         c_id)));
-      }
+  connect(insert_menu, &QMenu::triggered, this, [=](QAction *act) {
+    QVariant id = act->data();
+    struct city *pcity = game_city_by_number(city_id);
+    const struct worklist *worklist;
+
+    if (!pcity) {
+      return;
     }
-  }
+
+    fc_assert_ret(id.type() == QVariant::Int);
+    worklist = global_worklist_get(global_worklist_by_id(id.toInt()));
+    city_queue_insert_worklist(pcity, selected_row_p + 1, worklist);
+  });
+
+  list_menu->popup(QCursor::pos());
 }
 
 /************************************************************************//**
@@ -2949,7 +2961,8 @@ void city_dialog::update_info_label()
 
   enum { FOOD = 0, SHIELD = 2, TRADE = 4, GOLD = 6, LUXURY = 8, SCIENCE = 10,
          GRANARY = 12, GROWTH = 14, CORRUPTION = 16, WASTE = 18,
-         CULTURE = 20, POLLUTION = 22, ILLNESS = 24, STEAL = 26
+         CULTURE = 20, POLLUTION = 22, ILLNESS = 24, STEAL = 26,
+         AIRLIFT = 28,
        };
 
   /* fill the buffers with the necessary info */
@@ -3019,7 +3032,7 @@ void city_dialog::update_info_label()
   } else {
     illness = city_illness_calc(pcity, NULL, NULL, NULL, NULL);
     /* illness is in tenth of percent */
-    fc_snprintf(buf[ILLNESS], sizeof(buf[ILLNESS]), "%4.1f",
+    fc_snprintf(buf[ILLNESS], sizeof(buf[ILLNESS]), "%4.1f%%",
                 (float) illness / 10.0);
   }
   if (pcity->steal) {
@@ -3027,6 +3040,10 @@ void city_dialog::update_info_label()
   } else {
     fc_snprintf(buf[STEAL], sizeof(buf[STEAL]), _("Not stolen"));
   }
+
+  get_city_dialog_airlift_value(pcity, buf[AIRLIFT], sizeof(buf[AIRLIFT]));
+  get_city_dialog_airlift_text(pcity,
+                               buf[AIRLIFT + 1], sizeof(buf[AIRLIFT + 1]));
 
   get_city_dialog_output_text(pcity, O_FOOD, buffer, sizeof(buffer));
 
@@ -3037,7 +3054,9 @@ void city_dialog::update_info_label()
 
     if (j != GROWTH && j != GRANARY && j != WASTE && j != CORRUPTION
         && j != STEAL) {
-      qlt[i]->setToolTip(QString(buf[2 * i + 1]));
+      qlt[i]->setToolTip("<pre>"
+                         + QString(buf[2 * i + 1]).toHtmlEscaped()
+                         + "</pre>");
     }
   }
 }
@@ -3257,15 +3276,16 @@ void city_dialog::update_building()
 void city_dialog::buy()
 {
   char buf[1024], buf2[1024];
-  int ret;
   const char *name = city_production_name_translation(pcity);
   int value = pcity->client.buy_cost;
-  hud_message_box ask(city_dlg);
+  hud_message_box *ask;
+  int city_id = pcity->id;
 
   if (!can_client_issue_orders()) {
     return;
   }
 
+  ask = new hud_message_box(city_dlg);
   fc_snprintf(buf2, ARRAY_SIZE(buf2), PL_("Treasury contains %d gold.",
                                         "Treasury contains %d gold.",
                                         client_player()->economic.gold),
@@ -3273,20 +3293,20 @@ void city_dialog::buy()
   fc_snprintf(buf, ARRAY_SIZE(buf), PL_("Buy %s for %d gold?",
                                         "Buy %s for %d gold?", value),
               name, value);
-  ask.set_text_title(QString(buf), QString(buf2));
-  ask.setStandardButtons(QMessageBox::Cancel | QMessageBox::Ok);
-  ask.setDefaultButton(QMessageBox::Cancel);
-  ret = ask.exec();
+  ask->set_text_title(buf, buf2);
+  ask->setStandardButtons(QMessageBox::Cancel | QMessageBox::Ok);
+  ask->setDefaultButton(QMessageBox::Cancel);
+  ask->setAttribute(Qt::WA_DeleteOnClose);
+  connect(ask, &hud_message_box::accepted, this, [=]() {
+    struct city *pcity = game_city_by_number(city_id);
 
-  switch (ret) {
-  case QMessageBox::Cancel:
-    return;
-    break;
+    if (!pcity) {
+      return;
+    }
 
-  case QMessageBox::Ok:
     city_buy_production(pcity);
-    break;
-  }
+  });
+  ask->show();
 }
 
 /************************************************************************//**
@@ -3349,7 +3369,7 @@ void city_dialog::update_improvements()
       str = city_improvement_name_translation(pcity, target.value.building);
       sprite = get_building_sprite(tileset, target.value.building);
       tooltip = get_tooltip_improvement(target.value.building,
-                                        nullptr, true).trimmed();
+                                        pcity, true).trimmed();
 
       if (improvement_has_flag(target.value.building, IF_GOLD)) {
         cost = -1;
@@ -3538,22 +3558,30 @@ void city_dialog::worklist_down()
 ****************************************************************************/
 void city_dialog::save_worklist()
 {
-  struct worklist queue;
-  struct global_worklist *gw;
-  QString text;
-  hud_input_box ask(gui()->central_wdg);
+  hud_input_box *ask = new hud_input_box(gui()->central_wdg);
+  int city_id = pcity->id;
 
-  ask.set_text_title_definput(_("What should we name new worklist?"),
-                              _("Save current worklist"),
-                              _("New worklist"));
-  if (ask.exec() == QDialog::Accepted) {
-    text = ask.input_edit.text().toLocal8Bit().data();
+  ask->set_text_title_definput(_("What should we name new worklist?"),
+                               _("Save current worklist"),
+                               _("New worklist"));
+  ask->setAttribute(Qt::WA_DeleteOnClose);
+  connect(ask, &hud_message_box::accepted, [=]() {
+    struct global_worklist *gw;
+    struct worklist queue;
+    QByteArray ask_bytes;
+    QString text;
+    struct city *pcity = game_city_by_number(city_id);
+
+    ask_bytes = ask->input_edit.text().toLocal8Bit();
+    text = ask_bytes.data();
     if (!text.isEmpty()) {
-      gw = global_worklist_new(text.toLocal8Bit().data());
+      ask_bytes = text.toLocal8Bit();
+      gw = global_worklist_new(ask_bytes.data());
       city_get_queue(pcity, &queue);
       global_worklist_set(gw, &queue);
     }
-  }
+  });
+  ask->show();
 }
 
 /************************************************************************//**
@@ -3563,7 +3591,9 @@ void city_dialog::update_title()
 {
   QString buf;
 
-  lcity_name->setText(QString(city_name_get(pcity)));
+  // Defeat keyboard shortcut mnemonics
+  lcity_name->setText(QString(city_name_get(pcity))
+                      .replace("&", "&&"));
 
   if (city_unhappy(pcity)) {
     /* TRANS: city dialog title */
@@ -3663,10 +3693,10 @@ void city_font_update()
 
   l = city_dlg->findChildren<QLabel *>();
 
-  f = fc_font::instance()->get_font(fonts::city_label);
+  f = fc_font::instance()->get_font(fonts::notify_label);
 
   for (int i = 0; i < l.size(); ++i) {
-    if (l.at(i)->property(fonts::city_label).isValid()) {
+    if (l.at(i)->property(fonts::notify_label).isValid()) {
       l.at(i)->setFont(*f);
     }
   }
@@ -3747,6 +3777,9 @@ bool fc_tooltip::eventFilter(QObject *obj, QEvent *ev)
   return false;
 }
 
+/**************************************************************************
+  'text' is assumed to have already been HTML-escaped if necessary
+**************************************************************************/
 QString bold(QString text)
 {
   return QString("<b>" + text + "</b>");
@@ -3756,7 +3789,7 @@ QString bold(QString text)
   Returns improvement properties to append in tooltip
   ext is used to get extra info from help
 ****************************************************************************/
-QString get_tooltip_improvement(impr_type *building, struct city *pcity,
+QString get_tooltip_improvement(const impr_type *building, struct city *pcity,
                                 bool ext)
 {
   QString def_str;
@@ -3764,7 +3797,7 @@ QString get_tooltip_improvement(impr_type *building, struct city *pcity,
   QString s1, s2, str;
   const char *req = skip_intl_qualifier_prefix(_("?tech:None"));
 
-  if (pcity !=  nullptr) {
+  if (pcity != nullptr) {
     upkeep = QString::number(city_improvement_upkeep(pcity, building));
   } else {
     upkeep = QString::number(building->upkeep);
@@ -3779,13 +3812,21 @@ QString get_tooltip_improvement(impr_type *building, struct city *pcity,
   str = _("Obsolete by:");
   str = str + " " + s2;
   def_str = "<p style='white-space:pre'><b>"
-            + QString(improvement_name_translation(building))
+            + QString(improvement_name_translation(building)).toHtmlEscaped()
             + "</b>\n";
-  def_str += QString(_("Cost: %1, Upkeep: %2\n"))
-             .arg(impr_build_shield_cost(pcity,building))
-             .arg(upkeep);
+  if (pcity != nullptr) {
+    def_str += QString(_("Cost: %1, Upkeep: %2\n"))
+               .arg(impr_build_shield_cost(pcity, building))
+               .arg(upkeep).toHtmlEscaped();
+  } else {
+    int cost_est = impr_estimate_build_shield_cost(client.conn.playing, NULL, building);
+
+    def_str += QString(_("Cost Estimate: %1, Upkeep: %2\n"))
+               .arg(cost_est)
+               .arg(upkeep).toHtmlEscaped();
+  }
   if (s1.compare(s2) != 0) {
-    def_str = def_str + str + "\n";
+    def_str = def_str + str.toHtmlEscaped() + "\n";
   }
   def_str = def_str + "\n";
   if (ext) {
@@ -3796,7 +3837,7 @@ QString get_tooltip_improvement(impr_type *building, struct city *pcity,
     str = cut_helptext(str);
     str = split_text(str, true);
     str = str.trimmed();
-    def_str = def_str + str;
+    def_str = def_str + str.toHtmlEscaped();
   }
   return def_str;
 }
@@ -3805,48 +3846,54 @@ QString get_tooltip_improvement(impr_type *building, struct city *pcity,
   Returns unit properties to append in tooltip
   ext is used to get extra info from help
 ****************************************************************************/
-QString get_tooltip_unit(struct unit_type *unit, bool ext)
+QString get_tooltip_unit(const struct unit_type *utype, bool ext)
 {
   QString def_str;
   QString obsolete_str;
   QString str;
-  struct unit_type *obsolete;
+  const struct unit_type *obsolete;
   struct advance *tech;
 
-  def_str = "<b>" + QString(utype_name_translation(unit)) + "</b>\n";
-  obsolete = unit->obsoleted_by;
+  def_str = "<b>"
+    + QString(utype_name_translation(utype)).toHtmlEscaped()
+    + "</b>\n";
+  obsolete = utype->obsoleted_by;
   if (obsolete) {
     tech = obsolete->require_advance;
     obsolete_str = QString("</td></tr><tr><td colspan=\"3\">");
     if (tech && tech != advance_by_number(0)) {
+      /* TRANS: this and nearby literal strings are interpreted
+       * as (Qt) HTML */
       obsolete_str = obsolete_str + QString(_("Obsoleted by %1 (%2)."))
-                                      .arg(utype_name_translation(obsolete))
-                                      .arg(advance_name_translation(tech));
+          .arg(utype_name_translation(obsolete))
+          .arg(advance_name_translation(tech)).toHtmlEscaped();
     } else {
       obsolete_str = obsolete_str + QString(_("Obsoleted by %1."))
-                     .arg(utype_name_translation(obsolete));
+          .arg(utype_name_translation(obsolete)).toHtmlEscaped();
     }
   }
   def_str += "<table width=\"100\%\"><tr><td>"
              + bold(QString(_("Attack:"))) + " "
-             + QString::number(unit->attack_strength)
+             + QString::number(utype->attack_strength).toHtmlEscaped()
              + QString("</td><td>") + bold(QString(_("Defense:"))) + " "
-             + QString::number(unit->defense_strength)
+             + QString::number(utype->defense_strength).toHtmlEscaped()
              + QString("</td><td>") + bold(QString(_("Move:"))) + " "
-             + QString(move_points_text(unit->move_rate, TRUE))
+             + QString(move_points_text(utype->move_rate, TRUE)).toHtmlEscaped()
              + QString("</td></tr><tr><td>")
              + bold(QString(_("Cost:"))) + " "
-             + QString::number(utype_build_shield_cost_base(unit))
+             + QString::number(utype_build_shield_cost_base(utype))
+               .toHtmlEscaped()
              + QString("</td><td colspan=\"2\">")
              + bold(QString(_("Basic Upkeep:")))
-             + " " + QString(helptext_unit_upkeep_str(unit))
+             + " " + QString(helptext_unit_upkeep_str(utype)).toHtmlEscaped()
              + QString("</td></tr><tr><td>")
              + bold(QString(_("Hitpoints:"))) + " "
-             + QString::number(unit->hp)
+             + QString::number(utype->hp).toHtmlEscaped()
              + QString("</td><td>") + bold(QString(_("FirePower:"))) + " "
-             + QString::number(unit->firepower)
+             + QString::number(utype->firepower).toHtmlEscaped()
              + QString("</td><td>") + bold(QString(_("Vision:"))) + " "
-             + QString::number((int) sqrt((double) unit->vision_radius_sq))
+             + QString::number((int) sqrt((double) utype->vision_radius_sq))
+               .toHtmlEscaped()
              + obsolete_str
              + QString("</td></tr></table><p style='white-space:pre'>");
   if (ext) {
@@ -3855,12 +3902,13 @@ QString get_tooltip_unit(struct unit_type *unit, bool ext)
 
     buf2[0] = '\0';
     str = helptext_unit(buffer, sizeof(buffer), client.conn.playing,
-                        buf2, unit);
+                        buf2, utype);
     str = cut_helptext(str);
     str = split_text(str, true);
-    str = str.trimmed();
+    str = str.trimmed().toHtmlEscaped();
     def_str = def_str + str;
   }
+
   return def_str;
 };
 
@@ -3896,7 +3944,7 @@ QString get_tooltip(QVariant qvar)
   ret_str = cut_helptext(str);
   ret_str = split_text(ret_str, true);
   ret_str = ret_str.trimmed();
-  ret_str = def_str + ret_str;
+  ret_str = def_str + ret_str.toHtmlEscaped();
 
   return ret_str;
 }
@@ -3948,7 +3996,7 @@ void city_production_delegate::paint(QPainter *painter,
 
   qvar = index.data();
 
-  if (qvar.isValid() == false) {
+  if (!qvar.isValid()) {
     return;
   }
 
@@ -3966,23 +4014,23 @@ void city_production_delegate::paint(QPainter *painter,
     is_neutral = utype_has_flag(target->value.utype, UTYF_CIVILIAN);
     pclass = utype_class(target->value.utype);
     if (!uclass_has_flag(pclass, UCF_TERRAIN_DEFENSE)
-        && !uclass_has_flag(pclass, UCF_CAN_FORTIFY)
+        && !utype_can_do_action_result(target->value.utype, ACTRES_FORTIFY)
         && !uclass_has_flag(pclass, UCF_ZOC)) {
       is_sea = true;
     }
 
     if ((utype_fuel(target->value.utype)
          && !uclass_has_flag(pclass, UCF_TERRAIN_DEFENSE)
-         && !uclass_has_flag(pclass, UCF_CAN_PILLAGE)
-         && !uclass_has_flag(pclass, UCF_CAN_FORTIFY)
+         && !utype_can_do_action_result(target->value.utype, ACTRES_PILLAGE)
+         && !utype_can_do_action_result(target->value.utype, ACTRES_FORTIFY)
          && !uclass_has_flag(pclass, UCF_ZOC))
         /* FIXME: Assumed to be flying since only missiles can do suicide
          * attacks in classic-like rulesets. This isn't true for all
          * rulesets. Not a high priority to fix since all is_flying and
          * is_sea is used for is to set a color. */
-        || utype_can_do_action(target->value.utype,
-                               ACTION_SUICIDE_ATTACK)) {
-      if (is_sea == true) {
+        || utype_is_consumed_by_action_result(ACTRES_ATTACK,
+                                              target->value.utype)) {
+      if (is_sea) {
         is_sea = false;
       }
       is_flying = true;
@@ -4047,7 +4095,7 @@ void city_production_delegate::paint(QPainter *painter,
 
   painter->restore();
 
-  if (free_sprite == TRUE) {
+  if (free_sprite) {
     qtg_free_sprite(sprite);
   }
 }
@@ -4204,15 +4252,15 @@ void city_production_model::populate()
       /* renagade deleted in production_item destructor */
       if (VUT_UTYPE == renegade->kind) {
         str = utype_name_translation(renegade->value.utype);
-        sh.setX(qMax(sh.x(), fm.width(str)));
+        sh.setX(qMax(sh.x(), fm.horizontalAdvance(str)));
 
-        if (show_units == true) {
+        if (show_units) {
           pi = new production_item(renegade, this);
           city_target_list << pi;
         }
       } else {
         str = improvement_name_translation(renegade->value.building);
-        sh.setX(qMax(sh.x(), fm.width(str)));
+        sh.setX(qMax(sh.x(), fm.horizontalAdvance(str)));
 
         if ((is_wonder(renegade->value.building) && show_wonders)
             || (is_improvement(renegade->value.building) && show_buildings)
@@ -4384,7 +4432,7 @@ void production_widget::prod_selected(const QItemSelection &sl,
   }
   index = indexes.at(0);
   qvar = index.data(Qt::UserRole);
-  if (qvar.isValid() == false) {
+  if (!qvar.isValid()) {
     return;
   }
   target = reinterpret_cast<universal *>(qvar.value<void *>());

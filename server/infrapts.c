@@ -28,8 +28,15 @@
 ****************************************************************************/
 void handle_player_place_infra(struct player *pplayer, int tile, int extra)
 {
-  struct tile *ptile = index_to_tile(&(wld.map), tile);
-  struct extra_type *pextra = extra_by_number(extra);
+  struct tile *ptile;
+  struct extra_type *pextra;
+
+  if (!terrain_control.infrapoints) {
+    return;
+  }
+
+  ptile = index_to_tile(&(wld.map), tile);
+  pextra = extra_by_number(extra);
 
   if (ptile == NULL || pextra == NULL) {
     return;
@@ -59,6 +66,15 @@ void handle_player_place_infra(struct player *pplayer, int tile, int extra)
   pplayer->economic.infra_points -= pextra->infracost;
   send_player_info_c(pplayer, pplayer->connections);
 
-  create_extra(ptile, pextra, pplayer);
-  update_tile_knowledge(ptile);
+  ptile->placing = pextra;
+
+  if (pextra->build_time > 0) {
+    ptile->infra_turns = pextra->build_time;
+  } else {
+    ptile->infra_turns = tile_terrain(ptile)->placing_time * pextra->build_time_factor;
+  }
+
+  /* update_tile_knowledge() would not know to send the tile
+   * when only placing has changed, so send it explicitly. */
+  send_tile_info(pplayer->connections, ptile, FALSE);
 }

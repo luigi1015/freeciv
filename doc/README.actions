@@ -120,19 +120,34 @@ show to players use name_translation().
 
 Example 1
 =========
-The following Lua code will log all actions done by any unit to a city or to
-another unit:
+The following Lua code will log all actions done by any unit to a city, to
+another unit, to a unit stack, to a tile or to itself:
 
 function action_started_callback(action, actor, target)
-  log.normal(_("%s (rule name: %s) performed by %s on %s"),
+  local target_owner
+  if target == nil then
+    target_owner = "it self"
+  elseif target.owner == nil then
+    target_owner = "unowned"
+  else
+    target_owner = target.owner.nation:plural_translation()
+  end
+
+  log.normal(_("%d: %s (rule name: %s) performed by %s %s (id: %d) on %s"),
+             game.current_turn(),
              action:name_translation(),
              action:rule_name(),
              actor.owner.nation:plural_translation(),
-             target.owner.nation:plural_translation())
+             actor.utype:rule_name(),
+             actor.id,
+             target_owner)
 end
 
 signal.connect("action_started_unit_city", "action_started_callback")
 signal.connect("action_started_unit_unit", "action_started_callback")
+signal.connect("action_started_unit_units", "action_started_callback")
+signal.connect("action_started_unit_tile", "action_started_callback")
+signal.connect("action_started_unit_self", "action_started_callback")
 
 Example 2
 =========
@@ -163,7 +178,7 @@ Actions done by a unit against a city
 "Establish Embassy" - Establish a real embassy to the target player
  * UI name can be set using ui_name_establish_embassy
  * actor must be aware that the target exists
- * actor can't have a real embassy to the target player
+ * actor can't have a real embassy to the target player (!)
  * actor must be on the same tile as the target or on the tile next to it.
  * target must be foreign. (!)
 
@@ -171,7 +186,7 @@ Actions done by a unit against a city
  * UI name can be set using ui_name_establish_embassy
  * spends the actor unit
  * actor must be aware that the target exists
- * actor can't have a real embassy to the target player
+ * actor can't have a real embassy to the target player (!)
  * actor must be on the same tile as the target or on the tile next to it.
  * target must be foreign. (!)
 
@@ -199,14 +214,25 @@ Actions done by a unit against a city
  * actor must be aware that the target exists
  * actor must be on the same tile as the target or on the tile next to it.
 
-"Targeted Sabotage City" - Targeted version of the above.
+"Targeted Sabotage City" - Destroy a building in the target city.
  * UI name can be set using ui_name_targeted_sabotage_city
  * spends the actor unit
  * actor must be aware that the target exists
  * actor must be on the same tile as the target or on the tile next to it.
 
-"Targeted Sabotage City Escape" - Targeted version of the above.
+"Targeted Sabotage City Escape" - Destroy a building in the target city.
  * UI name can be set using ui_name_targeted_sabotage_city_escape
+ * actor must be aware that the target exists
+ * actor must be on the same tile as the target or on the tile next to it.
+
+"Sabotage City Production" - Sabotage the city's produciton.
+ * UI name can be set using ui_name_sabotage_city_production
+ * spends the actor unit
+ * actor must be aware that the target exists
+ * actor must be on the same tile as the target or on the tile next to it.
+
+"Sabotage City Production Escape" - Sabotage the city's produciton.
+ * UI name can be set using ui_name_sabotage_city_production_escape
  * actor must be aware that the target exists
  * actor must be on the same tile as the target or on the tile next to it.
 
@@ -218,6 +244,13 @@ Actions done by a unit against a city
 
 "Poison City Escape" - Kill a citizen in the target city and escape.
  * UI name can be set using ui_name_poison_city_escape
+ * actor must be aware that the target exists
+ * actor must be on the same tile as the target or on the tile next to it.
+
+"Spread Plague" - Bio-terrorism. Infect the target city with an illness.
+ * UI name can be set using ui_name_spread_plague
+ * set if the actor unit is spent with spread_plague_actor_consuming_always
+ * may infect trade route connected cities if illness.illness_on is TRUE
  * actor must be aware that the target exists
  * actor must be on the same tile as the target or on the tile next to it.
 
@@ -274,6 +307,8 @@ Actions done by a unit against a city
 
 "Steal Gold" - Steal some gold from the owner of the target city.
  * UI name can be set using ui_name_steal_gold
+ * adjustable with the Max_Stolen_Gold_Pm effect and with the
+   Thiefs_Share_Pm effect
  * spends the actor unit
  * actor must be aware that the target exists
  * the targets owner must have more than 0 gold.
@@ -282,6 +317,8 @@ Actions done by a unit against a city
 
 "Steal Gold Escape" - Steal some gold from the owner of the target city.
  * UI name can be set using ui_name_steal_gold_escape
+ * adjustable with the Max_Stolen_Gold_Pm effect and with the
+   Thiefs_Share_Pm effect
  * actor must be aware that the target exists
  * the targets owner must have more than 0 gold.
  * actor must be on the same tile as the target or on the tile next to it.
@@ -289,6 +326,8 @@ Actions done by a unit against a city
 
 "Steal Maps" - Steal parts of the owner of the target city's map.
  * UI name can be set using ui_name_steal_maps
+ * adjustable with the effect Maps_Stolen_Pct and the ruleset setting
+   steal_maps_reveals_all_cities
  * spends the actor unit
  * actor must be aware that the target exists
  * actor must be on the same tile as the target or on the tile next to it.
@@ -296,6 +335,8 @@ Actions done by a unit against a city
 
 "Steal Maps Escape" - Steal parts of the owner of the target city's map.
  * UI name can be set using ui_name_steal_maps_escape
+ * adjustable with the effect Maps_Stolen_Pct and the ruleset setting
+   steal_maps_reveals_all_cities
  * actor must be aware that the target exists
  * actor must be on the same tile as the target or on the tile next to it.
  * target must be foreign. (!)
@@ -320,7 +361,7 @@ Actions done by a unit against a city
  * UI name can be set using ui_name_establish_trade_route
  * actor must be aware that the target exists
  * actor must be on the same tile as the target or on the tile next to it.
- * actor must have a home city.
+ * actor must have a home city. (!)
  * target must be foreign or trademindist tiles away from that home city.
  * trade route type pct (see "Trade settings") can't be 0%.
  * it is possible to establish a trade route between the cities as far as
@@ -333,21 +374,27 @@ Actions done by a unit against a city
  * actor must be aware that the target exists
  * if force_trade_route is true "Establish Trade Route" must be impossible
  * actor must be on the same tile as the target or on the tile next to it.
- * actor must have a home city.
+ * actor must have a home city. (!)
  * target must be foreign or trademindist tiles away from that home city.
  * trade route type (see Trade settings) can't be 0%.
 
 "Help Wonder" - Add the shields used to build the actor to the target city.
  * UI name can be set using ui_name_help_wonder
+ * adjustable with the Unit_Shield_Value_Pct effect
  * actor must be aware that the target exists
- * actor must be on the same tile as the target or on the tile next to it.
+ * actor must be on the same tile as the target unless
+   help_wonder_max_range allows it to be further away. (Default
+   help_wonder_max_range is 1)
  * target city must need the extra shields to complete its production.
 
 "Recycle Unit" - Add half the shields used to build the unit to target
  * UI name can be set using ui_name_recycle_unit
+ * adjustable with the Unit_Shield_Value_Pct effect
  * actor must be aware that the target exists
  * "Help Wonder" must be impossible
- * actor must be on the same tile as the target or on the tile next to it.
+ * actor must be on the same tile as the target unless
+   recycle_unit_max_range allows it to be further away. (Default
+   recycle_unit_max_range is 1)
  * target city must need the extra shields to complete its production.
 
 "Join City" - Add the actor to the target city's population.
@@ -371,6 +418,7 @@ Actions done by a unit against a city
 
 "Upgrade Unit" - Upgrade the actor unit using the target's facilities.
  * UI name can be set using ui_name_upgrade_unit.
+ * adjustable with the Unit_Shield_Value_Pct effect
  * actor must be aware that the target exists
  * actor must be on the same tile as the target.
  * actor player must have enough gold to pay for the upgrade.
@@ -383,28 +431,42 @@ Actions done by a unit against a city
 
 "Airlift Unit" - Airlift actor unit to target city.
  * UI name can be set using ui_name_airlift_unit
+ * max legal distance to the target can be set using airlift_max_range
  * actor must be aware that the target exists
  * the actor unit isn't transporting another unit (!)
  * the actor unit isn't inside the target city
  * the actor unit can exist in the target city (outside a transport)
- * the actor unit is in a city
-   - that is domestic or, if airliftingstyle permits it, allied
-   - that has Airlift (see the Airlift effect and the airliftingstyle
-     setting)
+ * the actor unit is in a city (!)
+ * the city the actor unit is in
+   - is domestic or, if airliftingstyle permits it, allied
+   - has Airlift (see the Airlift effect and the airliftingstyle setting)
  * the target city is domestic or, if airliftingstyle permits it, allied
  * the target city has Airlift
+
+"Nuke City" - Detonate in the target city. Cause a nuclear explosion.
+ * UI name can be set using ui_name_nuke_city
+ * if force_capture_units is true "Capture Units" must be impossible
+ * if force_bombard is true "Bombard", "Bombard 2" and "Bombard 3" must be
+   impossible.
+ * the actor unit must be on a tile next to the target unless
+   nuke_city_max_range allows it to be further away.
 
 "Conquer City" - Conquer the target city.
  * UI name can be set using ui_name_conquer_city
  * actor must be aware that the target exists
  * if force_capture_units is true "Capture Units" must be impossible
- * if force_bombard is true "Bombard" must be impossible
- * if force_explode_nuclear is true "Explode Nuclear" must be impossible
+ * if force_bombard is true "Bombard", "Bombard 2" and "Bombard 3" must be
+   impossible
+ * if force_explode_nuclear is true "Explode Nuclear", "Nuke Units" and
+   "Nuke City" must be impossible
  * "Attack" must be impossible
  * the actor unit must be on a tile next to the target.
  * the actor player's nation can't be an animal barbarian. (!)
- * the actor unit must, if transported, be able to disembark from its
-   transport.
+ * the actor unit's current transport, if the actor unit is transported,
+   must be in a city or in a base native to the current transport if the
+   current transport's unit class has the Unreachable unit class flag and
+   the actor's unit type doesn't list the current transport's unit class in
+   disembarks.
  * the actor unit doesn't have the "CoastStrict" unit type flag or the
    target city is on or adjacent to a tile that doesn't have the
    "UnsafeCoast" terrain flag.
@@ -418,6 +480,21 @@ Actions done by a unit against a city
    tile.
  * the target must be foreign (!)
  * the target city contains 0 units (!)
+
+"Conquer City 2" - Conquer the target city.
+* UI name can be set using ui_name_conquer_city_2
+* A copy of "Conquer City".
+* See "Conquer City" for everything else.
+
+"Surgical Strike Building" - Destroy a specific building.
+ * UI name can be set using ui_name_surgical_strike_building
+ * actor must be aware that the target exists
+ * the actor unit must be on a tile next to the target.
+
+"Surgical Strike Production" - Destroy the city production.
+* UI name can be set using ui_name_surgical_strike_production
+* actor must be aware that the target exists
+* the actor unit must be on a tile next to the target.
 
 Actions done by a unit against another unit
 ===========================================
@@ -446,9 +523,89 @@ Actions done by a unit against another unit
 
 "Heal Unit" - Restore the target unit's health.
  * UI name can be set using ui_name_heal_unit
- * spends all actor movement
  * actor must be on the same tile as the target or on the tile next to it.
  * target must be visible for the actor.
+
+"Transport Alight" - Exit target transport to same tile.
+ * UI name can be set using ui_name_transport_alight
+ * actor must be on the same tile as the target
+ * actor must be transported (!)
+ * actor must be on a livable tile (!)
+ * target must be transporting (!)
+ * target must be in a city or in a native base if the target's unit class
+   has the Unreachable unit class flag and the actor's unit type doesn't
+   list the target's unit class in disembarks.
+ * target must be visible for the actor.
+
+"Transport Unload" - Unload the target unit to same tile.
+ * UI name can be set using ui_name_transport_unload
+ * actor must be on the same tile as the target
+ * actor must have a transport_cap greater than 0
+ * actor must be transporting (!)
+ * actor must be in a city or in a native base if the actor's unit class
+   has the Unreachable unit class flag and the target's unit type doesn't
+   list the actor's unit class in disembarks.
+ * target must be transported (!)
+ * target must be on a livable tile (!)
+ * target must be visible for the actor.
+
+"Transport Board" - Enter target transport on the same tile.
+ * UI name can be set using ui_name_transport_board
+ * the actor unit can't currently be transported by the target unit.
+ * the actor unit's current transport, if the actor unit is transported,
+   must be in a city or in a base native to the current transport if the
+   current transport's unit class has the Unreachable unit class flag and
+   the actor's unit type doesn't list the current transport's unit class in
+   the disembarks field.
+ * the actor's unit class must appear in the target unit type's cargo field.
+ * the actor unit unit type must be different from the target unit type
+ * the actor unit or its (recursive) cargo, if it has cargo, must be unable
+   to transport itself, the target unit or the target unit's transporters.
+   See unit_transport_check()
+ * boarding won't cause a situation with more than 5 recursive transports
+ * the target unit must be domestic, allied or on the same team as the
+   actor unit is. (!)
+ * target must be in a city or in a base native to it if the target's unit
+   class has the Unreachable unit class flag and the actor's unit type
+   doesn't list the target's unit class in the embarks field.
+ * the target must be transporting fewer units than its unit type's
+   transport_cap field.
+ * target must be visible to the actor.
+
+"Transport Embark" - Enter target transport on a different tile.
+ * UI name can be set using ui_name_transport_embark
+ * the actor unit must be on a tile next to the target.
+ * the actor unit has at least one move fragment left (!)
+ * the actor unit can't currently be transported by the target unit.
+ * the actor unit's current transport, if the actor unit is transported,
+   must be in a city or in a base native to the current transport if the
+   current transport's unit class has the Unreachable unit class flag and
+   the actor's unit type doesn't list the current transport's unit class in
+   the disembarks field.
+ * the actor unit's type must be the target tile's terrain animal if the
+   player's nation is an animal barbarian.
+ * the actor unit can't be diplomatically forbidden from entering the target
+   tile.
+ * the actor unit doesn't have the "CoastStrict" unit type flag or the
+   target city is on or adjacent to a tile that doesn't have the
+   "UnsafeCoast" terrain flag.
+ * actor unit must be able to move to the target tile.
+ * the actor's unit class must appear in the target unit type's cargo field.
+ * the actor unit unit type must be different from the target unit type
+ * the actor unit or its (recursive) cargo, if it has cargo, must be unable
+   to transport itself, the target unit or the target unit's transporters.
+   See unit_transport_check()
+ * boarding won't cause a situation with more than 5 recursive transports
+ * the target unit must be domestic, allied or on the same team as the
+   actor unit is. (!)
+ * target must be in a city or in a base native to it if the target's unit
+   class has the Unreachable unit class flag and the actor's unit type
+   doesn't list the target's unit class in the embarks field.
+ * the target must be transporting fewer units than its unit type's
+   transport_cap field.
+ * the target tile can't contain any city or units not allied to the actor
+   unit and all its cargo.
+ * target must be visible to the actor.
 
 Actions done by a unit against all units at a tile
 ==================================================
@@ -468,15 +625,30 @@ Actions done by a unit against all units at a tile
  * target can't be in a city the actor player isn't at war with.
  * target owner must be at war with actor. (!)
 
+"Bombard 2" - bombard the units (and city) at the tile without killing them.
+ * UI name can be set using ui_name_bombard_2
+ * actor must be on a tile next to the target or, if bombard_2_max_range
+   allows it, futher away.
+ * A copy of "Bombard".
+ * See "Bombard" for everything else.
+
+"Bombard 3" - bombard the units (and city) at the tile without killing them.
+ * UI name can be set using ui_name_bombard_3
+ * actor must be on a tile next to the target or, if bombard_3_max_range
+   allows it, futher away.
+ * A copy of "Bombard".
+ * See "Bombard" for everything else.
+
 "Attack"
  * UI name can be set using ui_name_attack
  * if force_capture_units is true "Capture Units" must be impossible
- * if force_bombard is true "Bombard" must be impossible
- * if force_explode_nuclear is true "Explode Nuclear" must be impossible
+ * if force_bombard is true "Bombard", "Bombard 2" and "Bombard 3" must be
+   impossible
+ * if force_explode_nuclear is true "Explode Nuclear", "Nuke Units" and
+   "Nuke City" must be impossible
  * the actor must be on the tile next to the target.
  * the actor's attack must be above 0
  * the actor can't have the "NonMil" unit type flag (!)
- * the actor can't have the "Missile" unit class flag (!)
  * the actor must be native to the target tile unless it has the
    "AttackNonNative" unit class flag and not the "Only_Native_Attack" unit
    type flag.
@@ -494,12 +666,13 @@ Actions done by a unit against all units at a tile
  * UI name can be set using ui_name_suicide_attack
  * spends the actor unit
  * if force_capture_units is true "Capture Units" must be impossible
- * if force_bombard is true "Bombard" must be impossible
- * if force_explode_nuclear is true "Explode Nuclear" must be impossible
+ * if force_bombard is true "Bombard", "Bombard 2" and "Bombard 3" must be
+   impossible
+ * if force_explode_nuclear is true "Explode Nuclear", "Nuke Units" and
+   "Nuke City" must be impossible
  * the actor must be on the tile next to the target.
  * the actor's attack must be above 0
  * the actor can't have the "NonMil" unit type flag (!)
- * the actor must have the "Missile" unit class flag (!)
  * the actor must be native to the target tile unless it has the
    "AttackNonNative" unit class flag and not the "Only_Native_Attack" unit
    type flag.
@@ -513,6 +686,26 @@ Actions done by a unit against all units at a tile
    - it is in a city
    - it is on a tile with a native Extra
 
+"Nuke Units" - Detonate at the target unit stack. Cause a nuclear explosion.
+ * UI name can be set using ui_name_nuke_units
+ * if force_capture_units is true "Capture Units" must be impossible
+ * if force_bombard is true "Bombard", "Bombard 2" and "Bombard 3" must be
+   impossible
+ * the actor unit must be on a tile next to the target unless
+   nuke_units_max_range allows it to be further away.
+ * one or all (unreachableprotects) non transported units at the target
+   tile must be reachable. A unit is reachable if any of the following is
+   true:
+   - it doesn't have the "Unreachable" unit class flag
+   - it is listed in the actor unit's targets
+   - it is in a city
+   - it is on a tile with a native Extra
+
+"Spy Attack" - trigger a diplomatic battle to eliminate tile defenders.
+ * UI name can be set using ui_name_spy_attack
+ * the actor must be on the tile next to the target.
+ * the target tile must have at least 1 diplomatic defender.
+
 Actions done by a unit against a tile
 =====================================
 "Found City" - Found a city at the target tile.
@@ -520,20 +713,16 @@ Actions done by a unit against a tile
  * city name must be legal
  * the scenario setting prevent_new_cities must be false.
  * actor must be on the same tile as the target.
- * target must not have the NoCities terrain flag.
+ * target must not have the NoCities terrain flag. (!)
  * target must not be closer than citymindist to nearest city.
 
 "Explode Nuclear" - Detonate at the target tile. Cause a nuclear explosion.
  * UI name can be set using ui_name_explode_nuclear
  * if force_capture_units is true "Capture Units" must be impossible
- * if force_bombard is true "Bombard" must be impossible
- * actor must be on the same tile as the target or on the tile next to it.
- * if the actor unit isn't on the target tile
-   - the actor must have movement left
-   - the target tile must have a city or a unit
-   - the actor must be at war with any city on the target tile
-   - the actor must be at war with each unit on the target tile
-   - a unit at the target tile must be reachable unless it has a city
+ * if force_bombard is true "Bombard", "Bombard 2" and "Bombard 3" must be
+   impossible
+ * actor must be on the same tile as the target unless
+   explode_nuclear_max_range allows it to be further away.
 
 "Paradrop Unit" - move the actor unit to the target tile.
  * UI name can be set using ui_name_paradrop_unit
@@ -545,34 +734,81 @@ Actions done by a unit against a tile
    - the target city contains 0 units
  * the distance between actor and target is from 1 to paratroopers_range
  * the actor unit hasn't paradropped this turn
- * the actor unit has paratroopers_mr_req moves left
  * the actor unit isn't transporting another unit (!)
+ * the actor unit can't be diplomatically forbidden from entering the target
+   tile. (!)
  * the target tile is known (doesn't have to be seen) by the actor
+ * if the target tile is seen:
+   - the actor unit must be able to exist outside a transport on the target
+     tile if the target tile doesn't have a visible transport the actor unit
+     is able to load into on landing
+   - the target tile can't contain a city belonging to a player the actor
+     has peace, cease-fire or armistice with.
+   - the target tile can't contain any seen unit belonging to a player the
+     actor player has peace, cease-fire or armistice with.
 
 "Transform Terrain" - Transform tile terrain type.
  * UI name can be set using ui_name_transform_terrain
- * the actor unit has "Settlers" flag
+ * the actor unit has "Settlers" flag (!)
  * terrain type must be one that can be transformed
 
 "Cultivate"         - Transform tile terrain type by irrigating
  * UI name can be set using ui_name_cultivate_tf
- * the actor unit has "Settlers" flag
+ * the actor unit has "Settlers" flag (!)
  * terrain type must be one that can be transformed by irrigating
 
 "Plant"             - Transform tile terrain type by planting
  * UI name can be set using ui_name_plant
- * the actor unit has "Settlers" flag
+ * the actor unit has "Settlers" flag (!)
  * terrain type must be one that can be transformed by mining
 
 "Pillage"           - Pillage extra from tile
  * UI name can be set using ui_name_pillage
- * the actor unit has "CanPillage" unit class flag
  * terrain type must be one where pillaging is possible
+ * the target extra must be present at the target tile
+ * the terrain of the target tile must have a non 0 pillage_time
+ * no other unit can be pillaging the target extra
+ * the target extra must have the Pillage removal cause
+ * the target extra's rmreqs must be fulfilled
+ * the target extra can't be a dependency of another extra present at the
+   target tile
+ * the target extra can't have the AlwaysOnCityCenter extra flag if the
+   target tile has a city
+ * the target extra can't have the AutoOnCityCenter extra flag if the
+   target tile has a city and the city's owner can rebuild it
+ * the target extra must be the rule chosen extra if the civstyle section's
+   pillage_select is FALSE
 
-"Road"        - Build road at the target tile.
+"Clean Pollution"   - clean extra from the target tile.
+ * UI name can be set using ui_name_clean_pollution
+ * actor must be on the same tile as the target.
+ * the actor unit has the "Settlers" unit type flag (!)
+ * the target extra must be present at the target tile
+ * the terrain of the target tile must have a non 0 clean_pollution_time
+ * the target extra must have the CleanPollution removal cause
+ * the target extra's rmreqs must be fulfilled
+ * the target extra can't have the AlwaysOnCityCenter extra flag if the
+   target tile has a city
+ * the target extra can't have the AutoOnCityCenter extra flag if the
+   target tile has a city and the city's owner can rebuild it
+
+"Clean Fallout"     - clean extra from the target tile.
+ * UI name can be set using ui_name_clean_fallout
+ * actor must be on the same tile as the target.
+ * the actor unit has the "Settlers" unit type flag (!)
+ * the target extra must be present at the target tile
+ * the terrain of the target tile must have a non 0 clean_fallout_time
+ * the target extra must have the CleanFallout removal cause
+ * the target extra's rmreqs must be fulfilled
+ * the target extra can't have the AlwaysOnCityCenter extra flag if the
+   target tile has a city
+ * the target extra can't have the AutoOnCityCenter extra flag if the
+   target tile has a city and the city's owner can rebuild it
+
+"Build Road"        - Build road at the target tile.
  * UI name can be set using ui_name_road
  * actor must be on the same tile as the target.
- * the actor unit has the "Settlers" unit type flag
+ * the actor unit has the "Settlers" unit type flag (!)
  * the target tile can't have an extra that the target extra must bridge
    over (see extra type's bridged_over) unless the actor player knows a
    tech with the "Bridge" tech flag
@@ -592,7 +828,7 @@ Actions done by a unit against a tile
 
 "Build Base"        - Build base at the target tile.
  * UI name can be set using ui_name_build_base
- * the actor unit has the "Settlers" unit type flag
+ * the actor unit has the "Settlers" unit type flag (!)
  * the target tile can't have an extra that the target extra must bridge
    over (see extra type's bridged_over) unless the actor player knows a
    tech with the "Bridge" tech flag
@@ -610,7 +846,7 @@ Actions done by a unit against a tile
 "Build Mine"        - Build mine at the target tile.
  * UI name can be set using ui_name_build_mine
  * actor must be on the same tile as the target.
- * the actor unit has the "Settlers" unit type flag
+ * the actor unit has the "Settlers" unit type flag (!)
  * the target tile can't have an extra that the target extra must bridge
    over (see extra type's bridged_over) unless the actor player knows a
    tech with the "Bridge" tech flag
@@ -631,7 +867,7 @@ Actions done by a unit against a tile
 "Build Irrigation"  - Build irrigation at the target tile.
  * UI name can be set using ui_name_irrigate
  * actor must be on the same tile as the target.
- * the actor unit has the "Settlers" unit type flag
+ * the actor unit has the "Settlers" unit type flag (!)
  * the target tile can't have an extra that the target extra must bridge
    over (see extra type's bridged_over) unless the actor player knows a
    tech with the "Bridge" tech flag
@@ -650,6 +886,34 @@ Actions done by a unit against a tile
  * the build requirements of the target extra (see extra type's reqs) must
    be fulfilled
 
+"Transport Disembark" - Exit transport to target tile.
+* UI name can be set using ui_name_transport_disembark
+* the actor unit must be on a tile next to the target.
+* the actor unit has at least one move fragment left (!)
+* actor must be transported (!)
+* the actor unit's transport must be in a city or in a native base if the
+  transport's unit class has the Unreachable unit class flag and the
+  actor's unit type doesn't list the target's unit class in disembarks.
+* the actor unit doesn't have the "CoastStrict" unit type flag or the
+  target city is on or adjacent to a tile that doesn't have the
+  "UnsafeCoast" terrain flag.
+* the actor unit can't be diplomatically forbidden from entering the target
+  tile.
+* the actor unit's type must be the target tile's terrain animal if the
+  player's nation is an animal barbarian.
+* actor unit must be able to exist outside of a transport at the target
+  tile.
+* actor unit must be able to move to the target tile.
+* the target tile isn't blocked for the actor unit by some other unit's
+  zone of control (ZOC)
+* the target tile can't contain any city or units not allied to the actor
+  unit and all its cargo.
+
+"Transport Disembark 2" - Exit transport to target tile.
+* UI name can be set using ui_name_transport_disembark_2
+* A copy of "Transport Disembark".
+* See "Transport Disembark" for everything else.
+
 Actions done by a unit to it self
 =================================
 "Disband Unit" - Disband the unit.
@@ -662,9 +926,7 @@ Actions done by a unit to it self
 
 "Fortify"           - Fortify at tile
  * UI name can be set using ui_name_fortify
- * the actor unit has "CanFortify" unit class flag (!)
- * the actor unit can't have the "Cant_Fortify" unit type flag (!)
- * terrain type must be one where fortifying is possible
+ * the actor unit can't already be fortified (!)
 
 "Convert Unit" - Convert the unit to another unit type.
  * UI name can be set using ui_name_convert_unit
@@ -672,3 +934,22 @@ Actions done by a unit to it self
  * actor unit's converted form must be able to exist at its current
    location.
  * actor unit's converted form must have room for its current cargo.
+
+Ruleset defined actions
+=======================
+User actions are "blank". The ruleset does everything they do. The following
+ruleset variables allows user action number n to be further customized:
+ * ui_name_user_action_n
+   The UI name shown to the user in the action selection dialog.
+ * user_action_n_target_kind
+   The kind of target the action is done to. See target_reqs.
+   Legal values: "individual cities", "individual units", "unit stacks",
+                 "tiles" or "itself"
+ * user_action_n_min_range and user_action_n_max_range
+   What distance from the actor to the target is permitted for the action.
+ * user_action_n_actor_consuming_always
+   TRUE if Freeciv should make sure that the actor is spent after the action
+   is successfully done.
+
+The current ruleset defined actions are "User Action 1", "User Action 2" and
+"User Action 3".

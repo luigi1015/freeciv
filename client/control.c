@@ -91,6 +91,7 @@ enum unit_activity connect_activity;
 struct extra_type *connect_tgt;
 
 action_id goto_last_action;
+int goto_last_tgt;
 int goto_last_sub_tgt;
 enum unit_orders goto_last_order; /* Last order for goto */
 
@@ -284,6 +285,7 @@ void unit_register_battlegroup(struct unit *punit)
 void set_hover_state(struct unit_list *punits, enum cursor_hover_state state,
 		     enum unit_activity activity,
                      struct extra_type *tgt,
+                     int last_tgt,
                      int last_sub_tgt,
                      action_id action,
                      enum unit_orders order)
@@ -291,9 +293,17 @@ void set_hover_state(struct unit_list *punits, enum cursor_hover_state state,
   fc_assert_ret((punits && unit_list_size(punits) > 0)
                 || state == HOVER_NONE);
   fc_assert_ret(state == HOVER_CONNECT || activity == ACTIVITY_LAST);
-  fc_assert_ret(state == HOVER_GOTO || order == ORDER_LAST);
-  fc_assert_ret(state == HOVER_GOTO || action == ACTION_NONE);
-  exit_goto_state();
+  fc_assert_ret((state == HOVER_GOTO || state == HOVER_GOTO_SEL_TGT)
+                || order == ORDER_LAST);
+  fc_assert_ret((state == HOVER_GOTO || state == HOVER_GOTO_SEL_TGT)
+                || action == ACTION_NONE);
+
+  if (!((hover_state == HOVER_GOTO || hover_state == HOVER_GOTO_SEL_TGT)
+        && (state == HOVER_GOTO || state == HOVER_GOTO_SEL_TGT))) {
+    /* Exit goto unless this is a switch between goto states */
+    exit_goto_state();
+  }
+
   hover_state = state;
   connect_activity = activity;
   if (tgt) {
@@ -303,6 +313,7 @@ void set_hover_state(struct unit_list *punits, enum cursor_hover_state state,
   }
   goto_last_order = order;
   goto_last_action = action;
+  goto_last_tgt = last_tgt;
   goto_last_sub_tgt = last_sub_tgt;
 }
 
@@ -313,7 +324,7 @@ void clear_hover_state(void)
 {
   set_hover_state(NULL, HOVER_NONE,
                   ACTIVITY_LAST, NULL,
-                  -1, ACTION_NONE, ORDER_LAST);
+                  NO_TARGET, NO_TARGET, ACTION_NONE, ORDER_LAST);
 }
 
 /**********************************************************************//**
@@ -469,8 +480,8 @@ void clear_unit_orders(struct unit *punit)
   }
 
   if (punit->activity != ACTIVITY_IDLE
-      || punit->ai_controlled)  {
-    punit->ai_controlled = FALSE;
+      || punit->ssa_controller != SSA_NONE)  {
+    punit->ssa_controller = SSA_NONE;
     refresh_unit_city_dialogs(punit);
     request_new_unit_activity(punit, ACTIVITY_IDLE);
   } else if (unit_has_orders(punit)) {
@@ -640,7 +651,7 @@ static struct unit *find_best_focus_candidate(bool accept_current)
           && !unit_has_orders(punit)
           && (punit->moves_left > 0 || unit_type_get(punit)->move_rate == 0)
           && !punit->done_moving
-          && !punit->ai_controlled) {
+          && punit->ssa_controller == SSA_NONE) {
         return punit;
       }
     } unit_list_iterate_end;
@@ -675,7 +686,7 @@ void unit_focus_advance(void)
      * Is the unit which just lost focus a non-AI unit? If yes this
      * enables the auto end turn. 
      */
-    if (!punit->ai_controlled) {
+    if (punit->ssa_controller == SSA_NONE) {
       non_ai_unit_focus = TRUE;
       break;
     }
@@ -779,7 +790,7 @@ void unit_focus_update(void)
 	 || unit_has_orders(punit))
 	&& punit->moves_left > 0 
 	&& !punit->done_moving
-	&& !punit->ai_controlled) {
+        && punit->ssa_controller == SSA_NONE) {
       return;
     }
   } unit_list_iterate_end;
@@ -1105,12 +1116,6 @@ void request_unit_goto(enum unit_orders last_order,
     /* An action has been specified. */
     fc_assert_ret(action_id_exists(act_id));
 
-    /* The order system doesn't support actions that can be done to a
-     * target that isn't at or next to the actor unit's tile.
-     *
-     * Full explanation in handle_unit_orders(). */
-    fc_assert_ret(!action_id_distance_inside_max(act_id, 2));
-
     unit_list_iterate(punits, punit) {
       if (!unit_can_do_action(punit, act_id)) {
         /* This unit can't perform the action specified in the last
@@ -1144,15 +1149,17 @@ void request_unit_goto(enum unit_orders last_order,
     } unit_list_iterate_end;
   }
 
-  if (hover_state != HOVER_GOTO) {
+  if (hover_state != HOVER_GOTO && hover_state != HOVER_GOTO_SEL_TGT) {
     set_hover_state(punits, HOVER_GOTO, ACTIVITY_LAST, NULL,
-                    sub_tgt_id, act_id, last_order);
+                    NO_TARGET, sub_tgt_id, act_id, last_order);
     enter_goto_state(punits);
     create_line_at_mouse_pos();
     update_unit_info_label(punits);
     control_mouse_cursor(NULL);
   } else {
     fc_assert_ret(goto_is_active());
+    /* Adding a long range action in the middle isn't handled yet */
+    fc_assert_ret(hover_state != HOVER_GOTO_SEL_TGT);
     goto_add_waypoint();
   }
 }
@@ -1232,7 +1239,9 @@ void control_mouse_cursor(struct tile *ptile)
   case HOVER_GOTO:
     /* Determine if the goto is valid, invalid, nuke or will attack. */
     if (is_valid_goto_destination(ptile)) {
-      if (goto_last_action == ACTION_NUKE) {
+      if (action_id_has_result_safe(goto_last_action, ACTRES_NUKE_UNITS)
+          || action_id_has_result_safe(goto_last_action, ACTRES_NUKE_CITY)
+          || action_id_has_result_safe(goto_last_action, ACTRES_NUKE)) {
         /* Goto results in nuclear attack. */
         mouse_cursor_type = CURSOR_NUKE;
       } else if (can_units_attack_at(active_units, ptile)) {
@@ -1267,6 +1276,7 @@ void control_mouse_cursor(struct tile *ptile)
     mouse_cursor_type = CURSOR_PARADROP;
     break;
   case HOVER_ACT_SEL_TGT:
+  case HOVER_GOTO_SEL_TGT:
     /* Select a tile to target / find targets on. */
     mouse_cursor_type = CURSOR_SELECT;
     break;
@@ -1357,7 +1367,8 @@ static bool can_be_irrigated(const struct tile *ptile,
     return FALSE;
   }
 
-  return univs_have_action_enabler(ACTION_IRRIGATE, &for_unit, &for_tile);
+  return action_id_univs_not_blocking(ACTION_IRRIGATE,
+                                      &for_unit, &for_tile);
 }
 
 /**********************************************************************//**
@@ -1449,7 +1460,8 @@ void request_unit_connect(enum unit_activity activity,
           && (activity == ACTIVITY_GEN_ROAD
               || activity == ACTIVITY_IRRIGATE))) {
     set_hover_state(punits, HOVER_CONNECT,
-                    activity, tgt, -1, ACTION_NONE, ORDER_LAST);
+                    activity, tgt, NO_TARGET, NO_TARGET,
+                    ACTION_NONE, ORDER_LAST);
     enter_goto_state(punits);
     create_line_at_mouse_pos();
     update_unit_info_label(punits);
@@ -1520,7 +1532,8 @@ void request_unit_return(struct unit *punit)
       order.order = ORDER_ACTIVITY;
       order.dir = DIR8_ORIGIN;
       order.activity = ACTIVITY_SENTRY;
-      order.sub_target = -1;
+      order.target = NO_TARGET;
+      order.sub_target = NO_TARGET;
       order.action = ACTION_NONE;
       send_goto_path(punit, path, &order);
     } else {
@@ -1659,6 +1672,11 @@ void request_unit_select(struct unit_list *punits,
 void request_do_action(action_id action, int actor_id,
                        int target_id, int sub_tgt, const char *name)
 {
+  struct unit *actor_unit = game_unit_by_number(actor_id);
+
+  /* Giving an order takes back control. */
+  request_unit_ssa_set(actor_unit, SSA_NONE);
+
   dsend_packet_unit_do_action(&client.conn,
                               actor_id, target_id, sub_tgt, name,
                               action);
@@ -1667,7 +1685,7 @@ void request_do_action(action_id action, int actor_id,
 /**********************************************************************//**
   Request data for follow up questions about an action the unit can
   perform.
-  - action : The action more details .
+  - action : The action the follow up question is about.
   - actor_id : The unit ID of the acting unit.
   - target_id : The ID of the target unit or city.
 **************************************************************************/
@@ -1732,12 +1750,14 @@ void request_unit_non_action_move(struct unit *punit,
   p.dest_tile = tile_index(dest_tile);
 
   p.length = 1;
-  p.orders[0] = ORDER_MOVE;
-  p.dir[0] = dir;
-  p.activity[0] = ACTIVITY_LAST;
-  p.sub_target[0] = -1;
-  p.action[0] = ACTION_NONE;
+  p.orders[0].order = ORDER_MOVE;
+  p.orders[0].dir = dir;
+  p.orders[0].activity = ACTIVITY_LAST;
+  p.orders[0].target = NO_TARGET;
+  p.orders[0].sub_target = NO_TARGET;
+  p.orders[0].action = ACTION_NONE;
 
+  request_unit_ssa_set(punit, SSA_NONE);
   send_packet_unit_orders(&client.conn, &p);
 }
 
@@ -1784,12 +1804,15 @@ void request_move_unit_direction(struct unit *punit, int dir)
   p.dest_tile = tile_index(dest_tile);
 
   p.length = 1;
-  p.orders[0] = ORDER_ACTION_MOVE;
-  p.dir[0] = dir;
-  p.activity[0] = ACTIVITY_LAST;
-  p.sub_target[0] = -1;
-  p.action[0] = ACTION_NONE;
+  p.orders[0].order = (gui_options.popup_last_move_to_allied
+                       ? ORDER_ACTION_MOVE : ORDER_MOVE);
+  p.orders[0].dir = dir;
+  p.orders[0].activity = ACTIVITY_LAST;
+  p.orders[0].target = NO_TARGET;
+  p.orders[0].sub_target = NO_TARGET;
+  p.orders[0].action = ACTION_NONE;
 
+  request_unit_ssa_set(punit, SSA_NONE);
   send_packet_unit_orders(&client.conn, &p);
 }
 
@@ -1813,6 +1836,9 @@ void request_new_unit_activity_targeted(struct unit *punit,
   if (!can_client_issue_orders()) {
     return;
   }
+
+  /* Callers rely on this to take back control from server side agents. */
+  request_unit_ssa_set(punit, SSA_NONE);
 
   if (tgt == NULL) {
     dsend_packet_unit_change_activity(&client.conn, punit->id, act, EXTRA_NONE);
@@ -1842,7 +1868,7 @@ static void do_disband_alternative(void *p)
   int last_request_id_used;
   struct client_disband_unit_data *next;
   struct client_disband_unit_data *data = p;
-  const int act = disband_unit_alternatives[data->alt];
+  int act;
 
   fc_assert_ret(can_client_issue_orders());
 
@@ -1862,6 +1888,8 @@ static void do_disband_alternative(void *p)
                  unit_name_translation(punit));
     return;
   }
+
+  act = disband_unit_alternatives[data->alt];
 
   /* Prepare the data for the next try in case this try fails. */
   next = fc_malloc(sizeof(struct client_disband_unit_data));
@@ -1977,13 +2005,27 @@ void request_unit_convert(struct unit *punit)
 }
 
 /**********************************************************************//**
+  Call to request (from the server) that the unit is put under the
+  control of the specified server side agent or - if agent is SSA_NONE -
+  under client control.
+**************************************************************************/
+void request_unit_ssa_set(const struct unit *punit,
+                          enum server_side_agent agent)
+{
+  if (punit) {
+    dsend_packet_unit_server_side_agent_set(&client.conn, punit->id,
+                                            agent);
+  }
+}
+
+/**********************************************************************//**
   Call to request (from the server) that the settler unit is put into
   autosettler mode.
 **************************************************************************/
 void request_unit_autosettlers(const struct unit *punit)
 {
   if (punit && can_unit_do_autosettlers(punit)) {
-    dsend_packet_unit_autosettlers(&client.conn, punit->id);
+    request_unit_ssa_set(punit, SSA_AUTOSETTLER);
   } else if (punit) {
     create_event(unit_tile(punit), E_BAD_COMMAND, ftc_client,
                  _("Only settler units can be put into auto mode."));
@@ -2005,15 +2047,19 @@ void request_unit_load(struct unit *pcargo, struct unit *ptrans,
   if (ptrans
       && can_client_issue_orders()
       && could_unit_load(pcargo, ptrans)) {
-    dsend_packet_unit_load(&client.conn, pcargo->id, ptrans->id,
-                           ptile->index);
+    if (same_pos(unit_tile(pcargo), ptile)) {
+      request_do_action(ACTION_TRANSPORT_BOARD,
+                        pcargo->id, ptrans->id, 0, "");
+    } else {
+      request_do_action(ACTION_TRANSPORT_EMBARK,
+                        pcargo->id, ptrans->id, 0, "");
+    }
 
-    /* Sentry the unit.  Don't request_unit_sentry since this can give a
-     * recursive loop. */
+    /* Sentry the unit. */
     /* FIXME: Should not sentry if above loading fails (transport moved away,
      *        or filled already in server side) */
-    dsend_packet_unit_change_activity(&client.conn, pcargo->id,
-                                      ACTIVITY_SENTRY, EXTRA_NONE);
+    request_new_unit_activity_targeted(game_unit_by_number(pcargo->id),
+                                       ACTIVITY_SENTRY, NULL);
   }
 }
 
@@ -2029,13 +2075,19 @@ void request_unit_unload(struct unit *pcargo)
       && ptrans
       && can_unit_unload(pcargo, ptrans)
       && can_unit_survive_at_tile(&(wld.map), pcargo, unit_tile(pcargo))) {
-    dsend_packet_unit_unload(&client.conn, pcargo->id, ptrans->id);
+    if (unit_owner(pcargo) == client.conn.playing) {
+      request_do_action(ACTION_TRANSPORT_ALIGHT,
+                        pcargo->id, ptrans->id, 0, "");
+    } else {
+      request_do_action(ACTION_TRANSPORT_UNLOAD,
+                        ptrans->id, pcargo->id, 0, "");
+    }
 
     if (unit_owner(pcargo) == client.conn.playing
         && pcargo->activity == ACTIVITY_SENTRY) {
       /* Activate the unit. */
-      dsend_packet_unit_change_activity(&client.conn, pcargo->id,
-                                        ACTIVITY_IDLE, EXTRA_NONE);
+      request_new_unit_activity_targeted(game_unit_by_number(pcargo->id),
+                                         ACTIVITY_IDLE, NULL);
     }
   }
 }
@@ -2091,7 +2143,7 @@ void request_unit_paradrop(struct unit_list *punits)
                  _("Click on a tile to paradrop to it."));
 
     set_hover_state(punits, HOVER_PARADROP, ACTIVITY_LAST, NULL,
-                    -1, ACTION_NONE, ORDER_LAST);
+                    NO_TARGET, NO_TARGET, ACTION_NONE, ORDER_LAST);
     update_unit_info_label(punits);
   } else {
     create_event(offender, E_BAD_COMMAND, ftc_client,
@@ -2112,7 +2164,7 @@ void request_unit_patrol(void)
 
   if (hover_state != HOVER_PATROL) {
     set_hover_state(punits, HOVER_PATROL, ACTIVITY_LAST, NULL,
-                    -1, ACTION_NONE, ORDER_LAST);
+                    NO_TARGET, NO_TARGET, ACTION_NONE, ORDER_LAST);
     update_unit_info_label(punits);
     enter_goto_state(punits);
     create_line_at_mouse_pos();
@@ -2595,8 +2647,8 @@ void do_move_unit(struct unit *punit, struct unit *target_unit)
       && punit->activity != ACTIVITY_GOTO
       && punit->activity != ACTIVITY_SENTRY
       && ((gui_options.auto_center_on_automated == TRUE
-           && punit->ai_controlled == TRUE)
-          || (punit->ai_controlled == FALSE))
+           && punit->ssa_controller != SSA_NONE)
+          || (punit->ssa_controller == SSA_NONE))
       && !tile_visible_and_not_on_border_mapcanvas(dst_tile)) {
     center_tile_mapcanvas(dst_tile);
   }
@@ -2620,7 +2672,7 @@ void do_move_unit(struct unit *punit, struct unit *target_unit)
     refresh_unit_mapcanvas(punit, src_tile, TRUE, FALSE);
 
     if (gui_options.auto_center_on_automated == FALSE
-        && punit->ai_controlled == TRUE) {
+        && punit->ssa_controller != SSA_NONE) {
       /* Dont animate automatic units */
     } else if (do_animation) {
       int dx, dy;
@@ -2704,6 +2756,10 @@ void do_map_click(struct tile *ptile, enum quickselect_type qtype)
       break;	
     case HOVER_ACT_SEL_TGT:
       do_unit_act_sel_vs(ptile);
+      break;
+    case HOVER_GOTO_SEL_TGT:
+      fc_assert(action_id_exists(goto_last_action));
+      do_unit_goto(ptile);
       break;
     }
 
@@ -2886,7 +2942,12 @@ static struct unit *quickselect(struct tile *ptile,
 **************************************************************************/
 void do_unit_goto(struct tile *ptile)
 {
-  if (hover_state != HOVER_GOTO) {
+  fc_assert_ret(hover_state == HOVER_GOTO
+                || hover_state == HOVER_GOTO_SEL_TGT);
+  fc_assert_ret(goto_is_active());
+
+  if (hover_state == HOVER_GOTO_SEL_TGT) {
+    send_goto_route();
     return;
   }
 
@@ -2944,16 +3005,22 @@ void do_unit_connect(struct tile *ptile,
 **************************************************************************/
 void key_cancel_action(void)
 {
+  struct unit_list *punits = get_units_in_focus();
   cancel_tile_hiliting();
 
   switch (hover_state) {
+  case HOVER_GOTO_SEL_TGT:
+    set_hover_state(punits, HOVER_GOTO, connect_activity, connect_tgt,
+                    goto_last_tgt, goto_last_sub_tgt,
+                    goto_last_action, goto_last_order);
+    break;
   case HOVER_GOTO:
   case HOVER_PATROL:
   case HOVER_CONNECT:
     if (goto_pop_waypoint()) {
       break;
     }
-    /* else fall through: */
+    fc__fallthrough; /* else fall through: */
   case HOVER_PARADROP:
   case HOVER_ACT_SEL_TGT:
     clear_hover_state();
@@ -3101,6 +3168,34 @@ void key_unit_action_select_tgt(void)
     update_unit_info_label(punits);
 
     return;
+  } else if (hover_state == HOVER_GOTO_SEL_TGT) {
+    fc_assert(action_id_exists(goto_last_action));
+
+    /* We don't support long range actions in the middle of orders yet so
+     * send it at once. */
+    send_goto_route();
+
+    /* Target tile selected. Clean up hover state. */
+    clear_hover_state();
+    update_unit_info_label(punits);
+
+    return;
+  } else if (hover_state == HOVER_GOTO
+             && action_id_exists(goto_last_action)) {
+    struct action *paction = action_by_number(goto_last_action);
+
+    create_event(unit_tile(unit_list_get(punits, 0)), E_BEGINNER_HELP,
+                 ftc_client,
+                 /* TRANS: Perform action inside a goto. */
+                 _("Click on a tile to do %s against it."),
+                 action_name_translation(paction));
+
+    set_hover_state(punits, HOVER_GOTO_SEL_TGT,
+                    connect_activity, connect_tgt,
+                    goto_last_tgt, goto_last_sub_tgt,
+                    goto_last_action, goto_last_order);
+
+    return;
   }
 
   create_event(unit_tile(unit_list_get(punits, 0)), E_BEGINNER_HELP,
@@ -3110,7 +3205,7 @@ void key_unit_action_select_tgt(void)
                  "Press 'd' again to act against own tile."));
 
   set_hover_state(punits, HOVER_ACT_SEL_TGT, ACTIVITY_LAST, NULL,
-                  EXTRA_NONE, ACTION_NONE, ORDER_LAST);
+                  NO_TARGET, NO_TARGET, ACTION_NONE, ORDER_LAST);
 }
 
 /**********************************************************************//**
@@ -3226,7 +3321,7 @@ void key_unit_auto_explore(void)
 {
   unit_list_iterate(get_units_in_focus(), punit) {
     if (can_unit_do_activity(punit, ACTIVITY_EXPLORE)) {
-      request_new_unit_activity(punit, ACTIVITY_EXPLORE);
+      request_unit_ssa_set(punit, SSA_AUTOEXPLORE);
     }
   } unit_list_iterate_end;
 }
@@ -3345,11 +3440,35 @@ void key_unit_irrigate(void)
 }
 
 /**********************************************************************//**
+  Handle user 'cultivate' input
+**************************************************************************/
+void key_unit_cultivate(void)
+{
+  unit_list_iterate(get_units_in_focus(), punit) {
+    if (can_unit_do_activity(punit, ACTIVITY_CULTIVATE)) {
+      request_new_unit_activity(punit, ACTIVITY_CULTIVATE);
+    }
+  } unit_list_iterate_end;
+}
+
+/**********************************************************************//**
   Handle user 'build mine' input
 **************************************************************************/
 void key_unit_mine(void)
 {
   key_unit_extra(ACTIVITY_MINE, EC_MINE);
+}
+
+/**********************************************************************//**
+  Handle user 'plant' input
+**************************************************************************/
+void key_unit_plant(void)
+{
+  unit_list_iterate(get_units_in_focus(), punit) {
+    if (can_unit_do_activity(punit, ACTIVITY_PLANT)) {
+      request_new_unit_activity(punit, ACTIVITY_PLANT);
+    }
+  } unit_list_iterate_end;
 }
 
 /**********************************************************************//**

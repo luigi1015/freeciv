@@ -397,19 +397,6 @@ gboolean map_canvas_draw(GtkWidget *w, cairo_t *cr, gpointer data)
 }
 
 /**********************************************************************//**
-  Flush the given part of the canvas buffer (if there is one) to the
-  screen.
-**************************************************************************/
-void flush_mapcanvas(int canvas_x, int canvas_y,
-                     int pixel_width, int pixel_height)
-{
-  GdkRectangle rectangle = {canvas_x, canvas_y, pixel_width, pixel_height};
-  if (gtk_widget_get_realized(map_canvas) && !mapview_is_frozen()) {
-    gdk_window_invalidate_rect(gtk_widget_get_window(map_canvas), &rectangle, FALSE);
-  }
-}
-
-/**********************************************************************//**
   Mark the rectangular region as "dirty" so that we know to flush it
   later.
 **************************************************************************/
@@ -539,6 +526,7 @@ void pixmap_put_overlay_tile_draw(struct canvas *pcanvas,
 {
   cairo_t *cr;
   int sswidth, ssheight;
+  const double bright = 0.65; /* Fogged brightness compared to unfogged */
 
   if (!ssprite) {
     return;
@@ -547,31 +535,34 @@ void pixmap_put_overlay_tile_draw(struct canvas *pcanvas,
   get_sprite_dimensions(ssprite, &sswidth, &ssheight);
 
   if (fog) {
-    struct color *fogcol = color_alloc(0.0, 0.0, 0.0);
+    struct color *fogcol = color_alloc(0.0, 0.0, 0.0); /* black */
     cairo_surface_t *fog_surface;
     struct sprite *fogged;
     unsigned char *mask_in;
     unsigned char *mask_out;
     int i, j;
 
-    /* Create sprites fully transparent */
+    /* Create sprites initially fully transparent */
     fogcol->color.alpha = 0.0;
     fogged = create_sprite(sswidth, ssheight, fogcol);
     fog_surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, sswidth, ssheight);
 
-    /* Calculate black fog mask from the original sprite,
-     * we don't want to blacken transparent parts of the sprite */
+    /* Calculate black fog mask from the original sprite's alpha channel;
+     * we don't want to blacken transparent parts of the sprite. */
     mask_in = cairo_image_surface_get_data(ssprite->surface);
     mask_out = cairo_image_surface_get_data(fog_surface);
 
     for (i = 0; i < sswidth; i++) {
       for (j = 0; j < ssheight; j++) {
+        /* In order to darken pixels of ssprite to 'bright' fraction of
+         * their original value, we need to overlay blackness of
+         * (1-bright) transparency. */
         if (!is_bigendian()) {
           mask_out[(j * sswidth + i) * 4 + 3]
-            = 0.65 * mask_in[(j * sswidth + i) * 4 + 3];
+            = (1-bright) * mask_in[(j * sswidth + i) * 4 + 3];
         } else {
           mask_out[(j * sswidth + i) * 4 + 0]
-            = 0.65 * mask_in[(j * sswidth + i) * 4 + 0];
+            = (1-bright) * mask_in[(j * sswidth + i) * 4 + 0];
         }
       }
     }
@@ -583,7 +574,7 @@ void pixmap_put_overlay_tile_draw(struct canvas *pcanvas,
     cairo_set_source_surface(cr, ssprite->surface, 0, 0);
     cairo_paint(cr);
 
-    /* Then apply created fog to the intermediate sprite */
+    /* Then apply created fog to the intermediate sprite to darken it */
     cairo_set_source_surface(cr, fog_surface, 0, 0);
     cairo_paint(cr);
     cairo_destroy(cr);
@@ -766,3 +757,9 @@ void tileset_changed(void)
   }
 #endif /* FREECIV_MSWINDOWS */
 }
+
+/**********************************************************************//**
+  New turn callback
+**************************************************************************/
+void start_turn(void)
+{}

@@ -132,6 +132,8 @@ static struct {
 
 extern const char forced_tileset_name[];
 
+static int last_turn = 0;
+
 /************************************************************************//**
   Called below, and by client/client_main.c client_game_free()
 ****************************************************************************/
@@ -218,7 +220,7 @@ static struct unit *unpackage_unit(const struct packet_unit_info *packet)
     punit->changed_from_target = extra_by_number(packet->changed_from_tgt);
   }
 
-  punit->ai_controlled = packet->ai;
+  punit->ssa_controller = packet->ssa_controller;
   punit->fuel = packet->fuel;
   punit->goto_tile = index_to_tile(&(wld.map), packet->goto_tile);
   punit->paradropped = packet->paradropped;
@@ -247,19 +249,15 @@ static struct unit *unpackage_unit(const struct packet_unit_info *packet)
   if (punit->has_orders) {
     int i;
 
+    for (i = 0; i < packet->orders_length; i++) {
+      /* Just an assert. The client doesn't use the action data. */
+      fc_assert(packet->orders[i].order != ORDER_PERFORM_ACTION
+                || action_id_exists(packet->orders[i].action));
+    }
     punit->orders.list
       = fc_malloc(punit->orders.length * sizeof(*punit->orders.list));
-    for (i = 0; i < punit->orders.length; i++) {
-      punit->orders.list[i].order = packet->orders[i];
-      punit->orders.list[i].dir = packet->orders_dirs[i];
-      punit->orders.list[i].activity = packet->orders_activities[i];
-      punit->orders.list[i].sub_target = packet->orders_sub_targets[i];
-      punit->orders.list[i].action = packet->orders_actions[i];
-
-      /* Just an assert. The client doesn't use the action data. */
-      fc_assert(punit->orders.list[i].order != ORDER_PERFORM_ACTION
-                || action_id_exists(punit->orders.list[i].action));
-    }
+    memcpy(punit->orders.list, packet->orders,
+           punit->orders.length * sizeof(*punit->orders.list));
   }
 
   punit->action_decision_want = packet->action_decision_want;
@@ -344,6 +342,11 @@ void handle_server_join_reply(bool you_can_join, const char *message,
     }
 
     client_info.gui = get_gui_type();
+#ifdef EMERGENCY_VERSION
+    client_info.emerg_version = EMERGENCY_VERSION;
+#else
+    client_info.emerg_version = 0;
+#endif
     strncpy(client_info.distribution, FREECIV_DISTRIBUTOR,
             sizeof(client_info.distribution));
     send_packet_client_info(&client.conn, &client_info);
@@ -351,7 +354,7 @@ void handle_server_join_reply(bool you_can_join, const char *message,
     /* we could always use hack, verify we're local */
 #ifdef FREECIV_DEBUG
     if (!hackless || is_server_running())
-#endif
+#endif /* FREECIV_DEBUG */
     {
       send_client_wants_hack(challenge_file);
     }
@@ -1265,6 +1268,11 @@ void handle_new_year(int year, int fragments, int turn)
   }
 
   agents_new_turn();
+
+  if (last_turn != turn) {
+    start_turn();
+    last_turn = turn;
+  }
 }
 
 /************************************************************************//**
@@ -1575,12 +1583,13 @@ static bool handle_unit_packet_common(struct unit *packet_unit)
     ret = TRUE;
     punit->activity_count = packet_unit->activity_count;
     unit_change_battlegroup(punit, packet_unit->battlegroup);
-    if (punit->ai_controlled != packet_unit->ai_controlled) {
-      punit->ai_controlled = packet_unit->ai_controlled;
+    if (punit->ssa_controller != packet_unit->ssa_controller) {
+      punit->ssa_controller = packet_unit->ssa_controller;
       repaint_unit = TRUE;
       /* AI is set:     may change focus */
       /* AI is cleared: keep focus */
-      if (packet_unit->ai_controlled && unit_is_in_focus(punit)) {
+      if (packet_unit->ssa_controller != SSA_NONE
+          && unit_is_in_focus(punit)) {
         check_focus = TRUE;
       }
     }
@@ -2415,6 +2424,7 @@ void handle_player_info(const struct packet_player_info *pinfo)
     city_report_dialog_update();
     multipliers_dialog_update();
     update_info_label();
+    menus_update();
   }
 
   upgrade_canvas_clipboard();
@@ -2508,12 +2518,13 @@ void handle_research_info(const struct packet_research_info *packet)
       }
       science_report_dialog_update();
       if (tech_changed) {
-        /* If we just learned bridge building and focus is on a settler
-         * on a river the road menu item will remain disabled unless we
-         * do this. (applies in other cases as well.) */
-        if (0 < get_num_units_in_focus()) {
-          menus_update();
-        }
+        /* Some ways a new or lost tech can affect menus:
+         *  - If tech is needed for certain governments, the government
+         *    switching menus need updating.
+         *  - If we just learned/lost bridge building and focus is on a
+         *    worker on a river, the road menu item needs updating. */
+        menus_update();
+
 	script_client_signal_emit("new_tech");
 
         /* If we got a new tech the tech tree news an update. */
@@ -2924,6 +2935,23 @@ void handle_tile_info(const struct packet_tile_info *packet)
     tile_changed = TRUE;
   }
 
+  if (packet->placing < 0) {
+    if (ptile->placing != NULL) {
+      tile_changed = TRUE;
+      ptile->placing = NULL;
+      ptile->infra_turns = 0;
+    }
+  } else {
+    struct extra_type *old = ptile->placing;
+
+    ptile->placing = extra_by_number(packet->placing);
+    if (ptile->placing != old
+        || ptile->infra_turns != packet->place_turn - game.info.turn) {
+      tile_changed = TRUE;
+    }
+    ptile->infra_turns = packet->place_turn - game.info.turn;
+  }
+
   if (NULL == tile_worked(ptile)
       || tile_worked(ptile)->id != packet->worked) {
     if (IDENTITY_NUMBER_ZERO != packet->worked) {
@@ -3194,7 +3222,7 @@ void handle_ruleset_control(const struct packet_ruleset_control *packet)
     if (strcmp(packet->preferred_tileset, tileset_basename(tileset))) {
       /* It's not currently in use */
       if (gui_options.autoaccept_tileset_suggestion) {
-        tilespec_reread(game.control.preferred_tileset, FALSE, 1.0f);
+        tilespec_reread(game.control.preferred_tileset, TRUE, 1.0f);
       } else {
         popup_tileset_suggestion_dialog();
       }
@@ -3354,8 +3382,9 @@ void handle_ruleset_unit(const struct packet_ruleset_unit *p)
   u->defense_strength   = p->defense_strength;
   u->move_rate          = p->move_rate;
   u->require_advance    = advance_by_number(p->tech_requirement);
-  u->need_improvement   = improvement_by_number(p->impr_requirement);
-  u->need_government    = government_by_number(p->gov_requirement);
+  for (i = 0; i < p->build_reqs_count; i++) {
+    requirement_vector_append(&u->build_reqs, p->build_reqs[i]);
+  }
   u->vision_radius_sq = p->vision_radius_sq;
   u->transport_capacity = p->transport_capacity;
   u->hp                 = p->hp;
@@ -3371,8 +3400,6 @@ void handle_ruleset_unit(const struct packet_ruleset_unit *p)
     u->upkeep[o] = p->upkeep[o];
   } output_type_iterate_end;
   u->paratroopers_range = p->paratroopers_range;
-  u->paratroopers_mr_req = p->paratroopers_mr_req;
-  u->paratroopers_mr_sub = p->paratroopers_mr_sub;
   u->bombard_rate       = p->bombard_rate;
   u->city_size          = p->city_size;
   u->city_slots         = p->city_slots;
@@ -3794,6 +3821,7 @@ void handle_ruleset_terrain(const struct packet_ruleset_terrain *p)
   }
   pterrain->transform_result = terrain_by_number(p->transform_result);
   pterrain->transform_time = p->transform_time;
+  pterrain->placing_time = p->placing_time;
   pterrain->pillage_time = p->pillage_time;
   pterrain->clean_pollution_time = p->clean_pollution_time;
   pterrain->clean_fallout_time = p->clean_fallout_time;
@@ -4098,8 +4126,12 @@ void handle_ruleset_action(const struct packet_ruleset_action *p)
   sz_strlcpy(act->ui_name, p->ui_name);
   act->quiet = p->quiet;
 
+  act->result = p->result;
+  act->actor_consuming_always = p->actor_consuming_always;
+
   act->actor_kind  = p->act_kind;
   act->target_kind = p->tgt_kind;
+  act->sub_target_kind = p->sub_tgt_kind;
 
   act->min_distance = p->min_distance;
   act->max_distance = p->max_distance;
@@ -4390,10 +4422,21 @@ void handle_ruleset_style(const struct packet_ruleset_style *p)
 void handle_ruleset_clause(const struct packet_ruleset_clause *p)
 {
   struct clause_info *info = clause_info_get(p->type);
+  int i;
 
   fc_assert_ret_msg(NULL != info, "Bad clause %d.", p->type);
 
   info->enabled = p->enabled;
+
+  for (i = 0; i < p->giver_reqs_count; i++) {
+    requirement_vector_append(&info->giver_reqs, p->giver_reqs[i]);
+  }
+  fc_assert(info->giver_reqs.size == p->giver_reqs_count);
+
+  for (i = 0; i < p->receiver_reqs_count; i++) {
+    requirement_vector_append(&info->receiver_reqs, p->receiver_reqs[i]);
+  }
+  fc_assert(info->receiver_reqs.size == p->receiver_reqs_count);
 }
 
 /************************************************************************//**
@@ -4556,14 +4599,13 @@ void handle_city_name_suggestion_info(int unit_id, const char *name)
   The action can be a valid action or the special value ACTION_NONE.
   ACTION_NONE indicates that performing the action is impossible.
 ****************************************************************************/
-void handle_unit_action_answer(int diplomat_id, int target_id, int cost,
+void handle_unit_action_answer(int actor_id, int target_id, int cost,
                                action_id action_type,
                                bool disturb_player)
 {
   struct city *pcity = game_city_by_number(target_id);
   struct unit *punit = game_unit_by_number(target_id);
-  struct unit *pdiplomat = player_unit_by_number(client_player(),
-                                                 diplomat_id);
+  struct unit *pactor = player_unit_by_number(client_player(), actor_id);
   struct action *paction = action_by_number(action_type);
 
   if (ACTION_NONE != action_type
@@ -4573,20 +4615,20 @@ void handle_unit_action_answer(int diplomat_id, int target_id, int cost,
               action_type);
 
     if (disturb_player) {
-      action_selection_no_longer_in_progress(diplomat_id);
-      action_decision_clear_want(diplomat_id);
-      action_selection_next_in_focus(diplomat_id);
+      action_selection_no_longer_in_progress(actor_id);
+      action_decision_clear_want(actor_id);
+      action_selection_next_in_focus(actor_id);
     }
 
     return;
   }
 
-  if (!pdiplomat) {
-    log_debug("Bad actor %d.", diplomat_id);
+  if (!pactor) {
+    log_debug("Bad actor %d.", actor_id);
 
     if (disturb_player) {
-      action_selection_no_longer_in_progress(diplomat_id);
-      action_selection_next_in_focus(diplomat_id);
+      action_selection_no_longer_in_progress(actor_id);
+      action_selection_next_in_focus(actor_id);
     }
 
     return;
@@ -4598,9 +4640,9 @@ void handle_unit_action_answer(int diplomat_id, int target_id, int cost,
         && is_human(client.conn.playing)) {
       if (disturb_player) {
         /* Focus on the unit so the player knows where it is */
-        unit_focus_set(pdiplomat);
+        unit_focus_set(pactor);
 
-        popup_bribe_dialog(pdiplomat, punit, cost, paction);
+        popup_bribe_dialog(pactor, punit, cost, paction);
       } else {
         /* Not in use (yet). */
         log_error("Unimplemented: received background unit bribe cost.");
@@ -4608,9 +4650,9 @@ void handle_unit_action_answer(int diplomat_id, int target_id, int cost,
     } else {
       log_debug("Bad target %d.", target_id);
       if (disturb_player) {
-        action_selection_no_longer_in_progress(diplomat_id);
-        action_decision_clear_want(diplomat_id);
-        action_selection_next_in_focus(diplomat_id);
+        action_selection_no_longer_in_progress(actor_id);
+        action_decision_clear_want(actor_id);
+        action_selection_next_in_focus(actor_id);
       }
     }
     break;
@@ -4620,9 +4662,9 @@ void handle_unit_action_answer(int diplomat_id, int target_id, int cost,
         && is_human(client.conn.playing)) {
       if (disturb_player) {
         /* Focus on the unit so the player knows where it is */
-        unit_focus_set(pdiplomat);
+        unit_focus_set(pactor);
 
-        popup_incite_dialog(pdiplomat, pcity, cost, paction);
+        popup_incite_dialog(pactor, pcity, cost, paction);
       } else {
         /* Not in use (yet). */
         log_error("Unimplemented: received background city incite cost.");
@@ -4630,9 +4672,9 @@ void handle_unit_action_answer(int diplomat_id, int target_id, int cost,
     } else {
       log_debug("Bad target %d.", target_id);
       if (disturb_player) {
-        action_selection_no_longer_in_progress(diplomat_id);
-        action_decision_clear_want(diplomat_id);
-        action_selection_next_in_focus(diplomat_id);
+        action_selection_no_longer_in_progress(actor_id);
+        action_decision_clear_want(actor_id);
+        action_selection_next_in_focus(actor_id);
       }
     }
     break;
@@ -4652,18 +4694,18 @@ void handle_unit_action_answer(int diplomat_id, int target_id, int cost,
   case ACTION_NONE:
     log_debug("Server didn't respond to query.");
     if (disturb_player) {
-      action_selection_no_longer_in_progress(diplomat_id);
-      action_decision_clear_want(diplomat_id);
-      action_selection_next_in_focus(diplomat_id);
+      action_selection_no_longer_in_progress(actor_id);
+      action_decision_clear_want(actor_id);
+      action_selection_next_in_focus(actor_id);
     }
     break;
   default:
     log_error("handle_unit_action_answer() invalid action_type (%d).",
               action_type);
     if (disturb_player) {
-      action_selection_no_longer_in_progress(diplomat_id);
-      action_decision_clear_want(diplomat_id);
-      action_selection_next_in_focus(diplomat_id);
+      action_selection_no_longer_in_progress(actor_id);
+      action_decision_clear_want(actor_id);
+      action_selection_next_in_focus(actor_id);
     }
     break;
   };
@@ -4683,14 +4725,31 @@ static action_id auto_attack_act(const struct act_prob *act_probs)
       case ACTION_DISBAND_UNIT:
       case ACTION_FORTIFY:
       case ACTION_CONVERT:
+      case ACTION_TRANSPORT_ALIGHT:
+      case ACTION_TRANSPORT_BOARD:
+      case ACTION_TRANSPORT_EMBARK:
+      case ACTION_TRANSPORT_UNLOAD:
+      case ACTION_TRANSPORT_DISEMBARK1:
+      case ACTION_TRANSPORT_DISEMBARK2:
         /* Not interesting. */
+        break;
+      case ACTION_USER_ACTION1:
+      case ACTION_USER_ACTION2:
+      case ACTION_USER_ACTION3:
+        /* No idea. Assume not interesting. */
         break;
       case ACTION_CAPTURE_UNITS:
       case ACTION_BOMBARD:
+      case ACTION_BOMBARD2:
+      case ACTION_BOMBARD3:
       case ACTION_NUKE:
+      case ACTION_NUKE_CITY:
+      case ACTION_NUKE_UNITS:
       case ACTION_ATTACK:
       case ACTION_SUICIDE_ATTACK:
       case ACTION_CONQUER_CITY:
+      case ACTION_CONQUER_CITY2:
+      case ACTION_STRIKE_PRODUCTION:
         /* An attack. */
         if (attack_action == ACTION_NONE) {
           /* No previous attack action found. */
@@ -4708,10 +4767,13 @@ static action_id auto_attack_act(const struct act_prob *act_probs)
       case ACTION_SPY_POISON_ESC:
       case ACTION_SPY_STEAL_GOLD:
       case ACTION_SPY_STEAL_GOLD_ESC:
+      case ACTION_SPY_SPREAD_PLAGUE:
       case ACTION_SPY_SABOTAGE_CITY:
       case ACTION_SPY_SABOTAGE_CITY_ESC:
       case ACTION_SPY_TARGETED_SABOTAGE_CITY:
       case ACTION_SPY_TARGETED_SABOTAGE_CITY_ESC:
+      case ACTION_SPY_SABOTAGE_CITY_PRODUCTION:
+      case ACTION_SPY_SABOTAGE_CITY_PRODUCTION_ESC:
       case ACTION_SPY_STEAL_TECH:
       case ACTION_SPY_STEAL_TECH_ESC:
       case ACTION_SPY_TARGETED_STEAL_TECH:
@@ -4724,6 +4786,7 @@ static action_id auto_attack_act(const struct act_prob *act_probs)
       case ACTION_SPY_BRIBE_UNIT:
       case ACTION_SPY_SABOTAGE_UNIT:
       case ACTION_SPY_SABOTAGE_UNIT_ESC:
+      case ACTION_SPY_ATTACK:
       case ACTION_FOUND_CITY:
       case ACTION_JOIN_CITY:
       case ACTION_STEAL_MAPS:
@@ -4742,11 +4805,17 @@ static action_id auto_attack_act(const struct act_prob *act_probs)
       case ACTION_CULTIVATE:
       case ACTION_PLANT:
       case ACTION_PILLAGE:
+      case ACTION_CLEAN_POLLUTION:
+      case ACTION_CLEAN_FALLOUT:
       case ACTION_ROAD:
       case ACTION_BASE:
       case ACTION_MINE:
       case ACTION_IRRIGATE:
         /* An interesting non attack action has been found. */
+        return ACTION_NONE;
+        break;
+      case ACTION_STRIKE_BUILDING:
+        /* Needs a target to be specified. */
         return ACTION_NONE;
         break;
       case ACTION_COUNT:
@@ -4810,7 +4879,7 @@ void handle_unit_actions(const struct packet_unit_actions *packet)
        * found. The player wants it performed without questions. */
 
       /* The order requests below doesn't send additional details. */
-      fc_assert(!action_requires_details(auto_action));
+      fc_assert(!action_id_requires_details(auto_action));
 
       /* Give the order. */
       switch (action_id_get_target_kind(auto_action)) {
@@ -4872,22 +4941,21 @@ void handle_unit_actions(const struct packet_unit_actions *packet)
 /************************************************************************//**
   Handle list of potenttial buildings to sabotage.
 ****************************************************************************/
-void handle_city_sabotage_list(int diplomat_id, int city_id,
+void handle_city_sabotage_list(int actor_id, int city_id,
                                bv_imprs improvements,
                                action_id act_id,
                                bool disturb_player)
 {
   struct city *pcity = game_city_by_number(city_id);
-  struct unit *pdiplomat = player_unit_by_number(client_player(),
-                                                 diplomat_id);
+  struct unit *pactor = player_unit_by_number(client_player(), actor_id);
   struct action *paction = action_by_number(act_id);
 
-  if (!pdiplomat) {
-    log_debug("Bad diplomat %d.", diplomat_id);
+  if (!pactor) {
+    log_debug("Bad diplomat %d.", actor_id);
 
     if (disturb_player) {
-      action_selection_no_longer_in_progress(diplomat_id);
-      action_selection_next_in_focus(diplomat_id);
+      action_selection_no_longer_in_progress(actor_id);
+      action_selection_next_in_focus(actor_id);
     }
 
     return;
@@ -4897,9 +4965,9 @@ void handle_city_sabotage_list(int diplomat_id, int city_id,
     log_debug("Bad city %d.", city_id);
 
     if (disturb_player) {
-      action_selection_no_longer_in_progress(diplomat_id);
-      action_decision_clear_want(diplomat_id);
-      action_selection_next_in_focus(diplomat_id);
+      action_selection_no_longer_in_progress(actor_id);
+      action_decision_clear_want(actor_id);
+      action_selection_next_in_focus(actor_id);
     }
 
     return;
@@ -4914,9 +4982,9 @@ void handle_city_sabotage_list(int diplomat_id, int city_id,
 
     if (disturb_player) {
       /* Focus on the unit so the player knows where it is */
-      unit_focus_set(pdiplomat);
+      unit_focus_set(pactor);
 
-      popup_sabotage_dialog(pdiplomat, pcity, paction);
+      popup_sabotage_dialog(pactor, pcity, paction);
     } else {
       /* Not in use (yet). */
       log_error("Unimplemented: received background city building list.");
@@ -4924,8 +4992,8 @@ void handle_city_sabotage_list(int diplomat_id, int city_id,
   } else {
     log_debug("Can't issue orders");
     if (disturb_player) {
-      action_selection_no_longer_in_progress(diplomat_id);
-      action_decision_clear_want(diplomat_id);
+      action_selection_no_longer_in_progress(actor_id);
+      action_decision_clear_want(actor_id);
     }
   }
 }

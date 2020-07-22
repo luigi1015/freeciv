@@ -1,4 +1,4 @@
-/**********************************************************************
+/***********************************************************************
  Freeciv - Copyright (C) 1996 - A Kjeldberg, L Gregersen, P Unold
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -35,6 +35,8 @@ struct functions {
   const char *(*server_setting_name_get)(server_setting_id id);
   enum sset_type (*server_setting_type_get)(server_setting_id id);
   bool (*server_setting_val_bool_get)(server_setting_id id);
+  int (*server_setting_val_int_get)(server_setting_id id);
+  unsigned int (*server_setting_val_bitwise_get)(server_setting_id id);
   void (*create_extra)(struct tile *ptile, struct extra_type *pextra,
                        struct player *pplayer);
   void (*destroy_extra)(struct tile *ptile, struct extra_type *pextra);
@@ -51,7 +53,7 @@ struct functions {
   void (*gui_color_free)(struct color *pcolor);
 };
 
-const extern struct functions *fc_funcs;
+extern const struct functions *fc_funcs;
 
 struct functions *fc_interface_funcs(void);
 void fc_interface_init(void);

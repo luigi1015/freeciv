@@ -80,11 +80,11 @@ a game is in progress, there will be one server program running, and as many
 client programs as there are human players.  The server does not use a gui,
 but the clients do.  The clients come in many flavors:
 
-freeciv-gtk3:  This uses the GTK+ 3 libraries. To install, see section 1b of
+freeciv-gtk3:  This uses the GTK+ 3 libraries. To install, see section 1a of
   the INSTALL document.
 
 freeciv-gtk3.22:  This uses the GTK+ 3 libraries. Version 3.22 or 3.24
-  is required. To install, see section 1c of the INSTALL document.
+  is required. To install, see section 1b of the INSTALL document.
   This client is better supported and more developed than the others,
   as such it is considered to be the default interface throughout the rest of
   this document.
@@ -203,16 +203,17 @@ Client:
   - isotrident: An isometric tileset similar in shape to the one in Civ 2.
   - cimpletoon: amplio2 with alternative units that display direction they
                 are facing.
-  - trident: a Civ 1-style tileset with 30x30 tiles.
-  - hexemplio: an isometric hexagonal tileset with larger tiles derived
+  - trident: a Civ 1-style ('overhead') tileset with 30x30 tiles.
+  - hexemplio: an iso-hexagonal tileset with larger tiles derived
                from amplio2
   - toonhex: tileset combining hexemplio tiles with cimpletoon units
-  - isophex: an isometric hexagonal tileset
-  - hex2t: an overhead hexagonal tileset
-  - alio: an isometric hexagonal tileset with suitable graphics for alien
+  - isophex: an iso-hexagonal tileset
+  - hex2t: a hexagonal tileset
+  - alio: an iso-hexagonal tileset with suitable graphics for alien
           ruleset
 
-  In this release the amplio2 tileset is the default tileset.
+  In this release, each map topology has its own default tileset; with
+  default settings, amplio2 is the default tileset.
   To try another one, for instance the trident tileset, start the
   client with:
 

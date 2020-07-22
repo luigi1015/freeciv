@@ -69,7 +69,9 @@ struct tile *tile_claimer(const struct tile *ptile)
 void tile_set_owner(struct tile *ptile, struct player *pplayer,
                     struct tile *claimer)
 {
-  if (BORDERS_DISABLED != game.info.borders) {
+  if (BORDERS_DISABLED != game.info.borders
+      /* City tiles are always owned by the city owner. */
+      || (tile_city(ptile) != NULL || ptile->owner != NULL)) {
     ptile->owner = pplayer;
     ptile->claimer = claimer;
   }
@@ -178,23 +180,6 @@ const bv_extras *tile_extras_safe(const struct tile *ptile)
   }
 
   return &(ptile->extras);
-}
-
-/************************************************************************//**
-  Adds base to tile.
-  FIXME: Should remove conflicting old base and return bool indicating that.
-****************************************************************************/
-void tile_add_base(struct tile *ptile, const struct base_type *pbase)
-{
-  tile_add_extra(ptile, base_extra_get(pbase));
-}
-
-/************************************************************************//**
-  Removes base from tile if such exist
-****************************************************************************/
-void tile_remove_base(struct tile *ptile, const struct base_type *pbase)
-{
-  tile_remove_extra(ptile, base_extra_get(pbase));
 }
 
 /************************************************************************//**
@@ -443,7 +428,7 @@ bool tile_is_seen(const struct tile *target_tile,
   See also action_get_act_time()
 ****************************************************************************/
 int tile_activity_time(enum unit_activity activity, const struct tile *ptile,
-                       struct extra_type *tgt)
+                       const struct extra_type *tgt)
 {
   struct terrain *pterrain = tile_terrain(ptile);
 
@@ -901,26 +886,6 @@ bool tile_has_river(const struct tile *ptile)
 }
 
 /************************************************************************//**
-  Adds road to tile
-****************************************************************************/
-void tile_add_road(struct tile *ptile, const struct road_type *proad)
-{
-  if (proad != NULL) {
-    tile_add_extra(ptile, road_extra_get(proad));
-  }
-}
-
-/************************************************************************//**
-  Removes road from tile if such exist
-****************************************************************************/
-void tile_remove_road(struct tile *ptile, const struct road_type *proad)
-{
-  if (proad != NULL) {
-    tile_remove_extra(ptile, road_extra_get(proad));
-  }
-}
-
-/************************************************************************//**
   Check if tile contains road providing effect
 ****************************************************************************/
 bool tile_has_road_flag(const struct tile *ptile, enum road_flag_id flag)
@@ -1049,6 +1014,7 @@ struct tile *tile_virtual_new(const struct tile *ptile)
   vtile->units = unit_list_new();
   vtile->worked = NULL;
   vtile->owner = NULL;
+  vtile->placing = NULL;
   vtile->extras_owner = NULL;
   vtile->claimer = NULL;
   vtile->spec_sprite = NULL;
@@ -1175,4 +1141,12 @@ bool tile_set_label(struct tile *ptile, const char *label)
   }
 
   return changed;
+}
+
+/************************************************************************//**
+  Is there a placing ongoing?
+****************************************************************************/
+bool tile_is_placing(const struct tile *ptile)
+{
+  return ptile->placing != NULL;
 }

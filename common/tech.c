@@ -240,7 +240,7 @@ void techs_precalc_data(void)
         min_req = FALSE;
         break;
       }
-      /* No break. */
+      fc__fallthrough; /* No break. */
     case TECH_COST_CLASSIC:
       padvance->cost = game.info.base_tech_cost * (1.0 + num_reqs)
                        * sqrt(1.0 + num_reqs) / 2;
@@ -250,7 +250,7 @@ void techs_precalc_data(void)
         min_req = FALSE;
         break;
       }
-      /* No break. */
+      fc__fallthrough; /* No break. */
     case TECH_COST_EXPERIMENTAL:
       padvance->cost = game.info.base_tech_cost * ((num_reqs) * (num_reqs)
                            / (1 + sqrt(sqrt(num_reqs + 1))) - 0.5);
@@ -440,7 +440,7 @@ const char *tech_flag_helptxt(enum tech_flag_id id)
  resources, when we can check that it is not the one style without fixed
  costs.
 **************************************************************************/
-bool techs_have_fixed_costs()
+bool techs_have_fixed_costs(void)
 {
   return (game.info.tech_leakage == TECH_LEAKAGE_NONE
           && game.info.tech_cost_style != TECH_COST_CIV1CIV2);

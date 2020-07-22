@@ -52,6 +52,9 @@
 #include "unitlist.h"
 #include "vision.h"
 
+/* common/aicore */
+#include "cm.h"
+
 /* common/scriptcore */
 #include "luascript_types.h"
 
@@ -560,24 +563,9 @@ const char *city_name_suggestion(struct player *pplayer, struct tile *ptile)
 ****************************************************************************/
 int build_points_left(struct city *pcity)
 {
-  int cost = impr_build_shield_cost(pcity, pcity->production.value.building);
+  int cost = city_production_build_shield_cost(pcity);
 
   return cost - pcity->shield_stock;
-}
-
-/************************************************************************//**
-  How many veteran levels will created unit of this type get?
-****************************************************************************/
-int do_make_unit_veteran(struct city *pcity,
-                         const struct unit_type *punittype)
-{
-  int levels = get_unittype_bonus(city_owner(pcity), pcity->tile, punittype,
-                                  EFT_VETERAN_BUILD);
-  int max_levels = utype_veteran_levels(punittype) - 1;
-
-  levels = CLIP(0, levels, max_levels);
-
-  return levels;
 }
 
 /************************************************************************//**
@@ -1223,6 +1211,12 @@ bool transfer_city(struct player *ptaker, struct city *pcity,
     /* Update the city's trade routes. */
     reestablish_city_trade_routes(pcity);
 
+    /* Clear CMA. */
+    if (pcity->cm_parameter) {
+      free(pcity->cm_parameter);
+      pcity->cm_parameter = NULL;
+    }
+
     city_refresh(pcity);
   }
 
@@ -1665,7 +1659,7 @@ void remove_city(struct city *pcity)
   /* make sure ships are not left on land when city is removed. */
   unit_list_iterate_safe(pcenter->units, punit) {
     bool moved;
-    struct unit_type *punittype = unit_type_get(punit);
+    const struct unit_type *punittype = unit_type_get(punit);
 
     if (is_native_tile(punittype, pcenter)) {
       continue;
@@ -1674,10 +1668,22 @@ void remove_city(struct city *pcity)
     unit_activity_handling(punit, ACTIVITY_IDLE);
     moved = FALSE;
     adjc_iterate(&(wld.map), pcenter, tile1) {
+      struct unit *ptrans;
       if (!moved && is_native_tile(punittype, tile1)) {
         if (adv_could_unit_move_to_tile(punit, tile1) == 1) {
           /* Move */
-          moved = unit_move_handling(punit, tile1, FALSE, TRUE, NULL);
+          if (!can_unit_survive_at_tile(&(wld.map), punit, tile1)
+              && ((ptrans = transporter_for_unit_at(punit, tile1)))
+              && is_action_enabled_unit_on_unit(ACTION_TRANSPORT_EMBARK,
+                                                punit, ptrans)) {
+            /* "Transport Embark". */
+            moved = unit_perform_action(unit_owner(punit), punit->id,
+                                        ptrans->id, 0, "",
+                                        ACTION_TRANSPORT_EMBARK,
+                                        ACT_REQ_RULES);
+          } else {
+            moved = unit_move_handling(punit, tile1, FALSE, TRUE);
+          }
           if (moved) {
             notify_player(unit_owner(punit), tile1,
                           E_UNIT_RELOCATED, ftc_server,
@@ -2497,18 +2503,19 @@ void package_city(struct city *pcity, struct packet_city_info *packet,
   packet->steal = pcity->steal;
 
   packet->rally_point_length = pcity->rally_point.length;
+  packet->rally_point_persistent = pcity->rally_point.persistent;
+  packet->rally_point_vigilant = pcity->rally_point.vigilant;
   if (pcity->rally_point.length) {
-    packet->rally_point_persistent = pcity->rally_point.persistent;
-    packet->rally_point_vigilant = pcity->rally_point.vigilant;
-    for (i = 0; i < pcity->rally_point.length; i++) {
-      packet->rally_point_orders[i] = pcity->rally_point.orders[i].order;
-      packet->rally_point_dirs[i] = pcity->rally_point.orders[i].dir;
-      packet->rally_point_activities[i] = pcity->rally_point.orders[i]
-                                          .activity;
-      packet->rally_point_sub_targets[i] = pcity->rally_point.orders[i]
-                                           .sub_target;
-      packet->rally_point_actions[i] = pcity->rally_point.orders[i].action;
-    }
+    memcpy(packet->rally_point_orders, pcity->rally_point.orders,
+           pcity->rally_point.length * sizeof(struct unit_order));
+  }
+
+  if (pcity->cm_parameter) {
+    packet->cma_enabled = TRUE;
+    cm_copy_parameter(&packet->cm_parameter, pcity->cm_parameter);
+  } else {
+    packet->cma_enabled = FALSE;
+    memset(&packet->cm_parameter, 0, sizeof(packet->cm_parameter));
   }
 
   BV_CLR_ALL(packet->improvements);
@@ -2565,11 +2572,13 @@ bool update_dumb_city(struct player *pplayer, struct city *pcity)
     log_error("Trying to update bad city (wrong location) "
               "at %i,%i for player %s",
               TILE_XY(pcity->tile), player_name(pplayer));
+    fc_assert(pdcity->location == pcenter);
     pdcity->location = pcenter;   /* ?? */
   } else if (pdcity->identity != pcity->id) {
     log_error("Trying to update old city (wrong identity) "
               "at %i,%i for player %s",
               TILE_XY(city_tile(pcity)), player_name(pplayer));
+    fc_assert(pdcity->identity == pcity->id);
     pdcity->identity = pcity->id;   /* ?? */
   } else if (pdcity->occupied == occupied
              && pdcity->walls == walls
@@ -2727,56 +2736,22 @@ struct trade_route *remove_trade_route(struct city *pc1, struct trade_route *pro
   return back_route;
 }
 
-/************************************************************************//**
-  Remove/cancel the city's least valuable trade routes.
-****************************************************************************/
-static void remove_smallest_trade_routes(struct city *pcity)
+/**********************************************************************//**
+  Give the city a plague.
+**************************************************************************/
+void city_illness_strike(struct city *pcity)
 {
-  struct trade_route_list *smallest = trade_route_list_new();
+  notify_player(city_owner(pcity), city_tile(pcity), E_CITY_PLAGUE,
+                ftc_server,
+                _("%s has been struck by a plague! Population lost!"),
+                city_link(pcity));
+  city_reduce_size(pcity, 1, NULL, "plague");
+  pcity->turn_plague = game.info.turn;
 
-  (void) city_trade_removable(pcity, smallest);
-  trade_route_list_iterate(smallest, proute) {
-    struct trade_route *back;
-
-    back = remove_trade_route(pcity, proute, TRUE, FALSE);
-    free(proute);
-    free(back);
-  } trade_route_list_iterate_end;
-  trade_route_list_destroy(smallest);
-}
-
-/************************************************************************//**
-  Establish a trade route.
-****************************************************************************/
-void establish_trade_route(struct city *pc1, struct city *pc2)
-{
-  struct trade_route *proute;
-
-  if (city_num_trade_routes(pc1) >= max_trade_routes(pc1)) {
-    remove_smallest_trade_routes(pc1);
-  }
-
-  if (city_num_trade_routes(pc2) >= max_trade_routes(pc2)) {
-    remove_smallest_trade_routes(pc2);
-  }
-
-  proute = fc_malloc(sizeof(struct trade_route));
-  proute->partner = pc2->id;
-  proute->dir = RDIR_FROM;
-  trade_route_list_append(pc1->routes, proute);
-
-  proute = fc_malloc(sizeof(struct trade_route));
-  proute->partner = pc1->id;
-  proute->dir = RDIR_TO;
-  trade_route_list_append(pc2->routes, proute);
-
-  /* recalculate illness due to trade */
-  if (game.info.illness_on) {
-    pc1->server.illness = city_illness_calc(pc1, NULL, NULL,
-                                            &(pc1->illness_trade), NULL);
-    pc2->server.illness = city_illness_calc(pc2, NULL, NULL,
-                                            &(pc2->illness_trade), NULL);
-  }
+  /* recalculate illness */
+  pcity->server.illness
+    = city_illness_calc(pcity, NULL, NULL, &(pcity->illness_trade),
+                        NULL);
 }
 
 /************************************************************************//**
@@ -2867,7 +2842,7 @@ void city_units_upkeep(const struct city *pcity)
 {
   int free_uk[O_LAST];
   int cost;
-  struct unit_type *ut;
+  const struct unit_type *ut;
   struct player *plr;
   bool update;
 
@@ -2959,12 +2934,12 @@ void change_build_target(struct player *pplayer, struct city *pcity,
   switch (event) {
     case E_WORKLIST:
       /* TRANS: Possible 'source' of the production change
-       * (in "<city> is building ..." sentence). */
+       * (in "<city> is building ..." sentence). Preserve leading space. */
       source = _(" from the worklist");
       break;
     case E_IMP_AUTO:
       /* TRANS: Possible 'source' of the production change
-       * (in "<city> is building ..." sentence). */
+       * (in "<city> is building ..." sentence). Preserve leading space. */
       source = _(" as suggested by the advisor");
       break;
     default:

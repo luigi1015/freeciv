@@ -217,6 +217,8 @@ static void allied_chat_button_toggled(GtkToggleButton *button,
 
 static void free_unit_table(void);
 
+static void adjust_default_options(void);
+
 /**********************************************************************//**
   Callback for freelog
 **************************************************************************/
@@ -859,8 +861,28 @@ static GtkWidget *detached_widget_new(void)
 static GtkWidget *detached_widget_fill(GtkWidget *tearbox)
 {
   GtkWidget *b, *fillbox;
+  static GtkCssProvider *detach_button_provider = NULL;
+
+  if (detach_button_provider == NULL) {
+    detach_button_provider = gtk_css_provider_new();
+
+    /* These toggle buttons run vertically down the side of many UI
+     * elements, so they need to be thin horizontally. */
+    gtk_css_provider_load_from_data(detach_button_provider,
+                                    ".detach_button {\n"
+                                    "  padding: 0px 0px 0px 0px;\n"
+                                    "  min-width: 6px;\n"
+                                    "}",
+                                    -1, NULL);
+  }
 
   b = gtk_toggle_button_new();
+  gtk_style_context_add_provider(gtk_widget_get_style_context(b),
+                                 GTK_STYLE_PROVIDER(detach_button_provider),
+                                 GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+  gtk_style_context_add_class(gtk_widget_get_style_context(b),
+                              "detach_button");
+
   gtk_container_add(GTK_CONTAINER(tearbox), b);
   g_signal_connect(b, "toggled", G_CALLBACK(tearoff_callback), tearbox);
 
@@ -907,6 +929,8 @@ static void populate_unit_image_table(void)
   gtk_widget_add_events(unit_image, GDK_BUTTON_PRESS_MASK);
   g_object_ref(unit_image);
   unit_image_button = gtk_event_box_new();
+  gtk_widget_set_size_request(unit_image_button,
+                              tileset_tile_width(tileset), -1);
   gtk_event_box_set_visible_window(GTK_EVENT_BOX(unit_image_button), FALSE);
   g_object_ref(unit_image_button);
   gtk_container_add(GTK_CONTAINER(unit_image_button), unit_image);
@@ -923,6 +947,8 @@ static void populate_unit_image_table(void)
       gtk_widget_add_events(unit_below_image[i], GDK_BUTTON_PRESS_MASK);
       unit_below_image_button[i] = gtk_event_box_new();
       g_object_ref(unit_below_image_button[i]);
+      gtk_widget_set_size_request(unit_below_image_button[i],
+                                  tileset_tile_width(tileset), -1);
       gtk_event_box_set_visible_window(GTK_EVENT_BOX(unit_below_image_button[i]), FALSE);
       gtk_container_add(GTK_CONTAINER(unit_below_image_button[i]),
                         unit_below_image[i]);
@@ -1148,6 +1174,8 @@ static void setup_widgets(void)
   gtk_notebook_append_page(GTK_NOTEBOOK(notebook), page, NULL);
 
   top_vbox = gtk_grid_new();
+  gtk_orientable_set_orientation(GTK_ORIENTABLE(top_vbox),
+                                 GTK_ORIENTATION_VERTICAL);
   gtk_grid_set_row_spacing(GTK_GRID(top_vbox), 5);
   hgrid = gtk_grid_new();
 
@@ -1155,6 +1183,8 @@ static void setup_widgets(void)
     /* The window is divided into two horizontal panels: overview +
      * civinfo + unitinfo, main view + message window. */
     right_vbox = gtk_grid_new();
+    gtk_orientable_set_orientation(GTK_ORIENTABLE(right_vbox),
+                                   GTK_ORIENTATION_VERTICAL);
     gtk_container_add(GTK_CONTAINER(hgrid), right_vbox);
 
     paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
@@ -1174,7 +1204,7 @@ static void setup_widgets(void)
     gtk_paned_pack1(GTK_PANED(paned), top_vbox, TRUE, FALSE);
     gtk_container_add(GTK_CONTAINER(top_vbox), hgrid);
 
-    /* Overview size designed for netbooks. */
+    /* Overview size designed for big displays (desktops). */
     overview_canvas_store_width = OVERVIEW_CANVAS_STORE_WIDTH;
     overview_canvas_store_height = OVERVIEW_CANVAS_STORE_HEIGHT;
   }
@@ -1184,7 +1214,10 @@ static void setup_widgets(void)
   gtk_orientable_set_orientation(GTK_ORIENTABLE(vgrid),
                                  GTK_ORIENTATION_VERTICAL);
   gtk_grid_set_column_spacing(GTK_GRID(vgrid), 3);
-  gtk_container_add(GTK_CONTAINER(hgrid), vgrid);
+  /* Put vgrid to the left of anything else in hgrid -- right_vbox is either
+   * the chat/messages pane, or NULL which is OK */
+  gtk_grid_attach_next_to(GTK_GRID(hgrid), vgrid, right_vbox,
+                          GTK_POS_LEFT, 1, 1);
 
   /* overview canvas */
   ahbox = detached_widget_new();
@@ -1231,6 +1264,8 @@ static void setup_widgets(void)
   gtk_container_add(GTK_CONTAINER(vgrid), ahbox);
   gtk_widget_set_hexpand(ahbox, FALSE);
   avbox = detached_widget_fill(ahbox);
+  gtk_widget_set_vexpand(avbox, TRUE);
+  gtk_widget_set_valign(avbox, GTK_ALIGN_FILL);
 
   /* Info on player's civilization, when game is running. */
   frame = gtk_frame_new("");
@@ -1239,6 +1274,8 @@ static void setup_widgets(void)
   main_frame_civ_name = frame;
 
   vgrid = gtk_grid_new();
+  gtk_orientable_set_orientation(GTK_ORIENTABLE(vgrid),
+                                 GTK_ORIENTATION_VERTICAL);
   gtk_container_add(GTK_CONTAINER(frame), vgrid);
   gtk_widget_set_hexpand(vgrid, TRUE);
 
@@ -1433,6 +1470,8 @@ static void setup_widgets(void)
     gtk_paned_pack1(GTK_PANED(paned), top_notebook, TRUE, FALSE);
   } else if (GUI_GTK_OPTION(message_chat_location) == GUI_GTK_MSGCHAT_MERGED) {
     right_vbox = gtk_grid_new();
+    gtk_orientable_set_orientation(GTK_ORIENTABLE(right_vbox),
+                                   GTK_ORIENTATION_VERTICAL);
 
     gtk_container_add(GTK_CONTAINER(right_vbox), top_notebook);
     gtk_container_add(GTK_CONTAINER(right_vbox), ingame_votebar);
@@ -1651,6 +1690,61 @@ int main(int argc, char **argv)
 }
 
 /**********************************************************************//**
+  Migrate gtk3 client specific options from gtk2 client options.
+**************************************************************************/
+static void migrate_options_from_gtk2(void)
+{
+  log_normal(_("Migrating options from gtk2 to gtk3 client"));
+
+#define MIGRATE_OPTION(opt) gui_options.gui_gtk3_##opt = gui_options.gui_gtk2_##opt;
+#define MIGRATE_STR_OPTION(opt) \
+  strncpy(gui_options.gui_gtk3_##opt, gui_options.gui_gtk2_##opt,      \
+          sizeof(gui_options.gui_gtk3_##opt));
+
+  /* Default theme name is never migrated */
+  /* 'fullscreen', 'small_display_layout', and 'message_chat_location'
+   * not migrated, as (unlike Gtk2), Gtk3-client tries to pick better
+   * defaults for these in fresh installations based on screen size (see
+   * adjust_default_options()); so user is probably better served by
+   * getting these adaptive defaults than whatever they had for Gtk2.
+   * Since 'fullscreen' isn't migrated, we don't need to worry about
+   * preserving gui_gtk2_migrated_from_2_5 either. */
+  MIGRATE_OPTION(map_scrollbars);
+  MIGRATE_OPTION(dialogs_on_top);
+  MIGRATE_OPTION(show_task_icons);
+  MIGRATE_OPTION(enable_tabs);
+  MIGRATE_OPTION(show_chat_message_time);
+  MIGRATE_OPTION(new_messages_go_to_top);
+  MIGRATE_OPTION(show_message_window_buttons);
+  MIGRATE_OPTION(metaserver_tab_first);
+  MIGRATE_OPTION(allied_chat_only);
+  MIGRATE_OPTION(mouse_over_map_focus);
+  MIGRATE_OPTION(chatline_autocompletion);
+  MIGRATE_OPTION(citydlg_xsize);
+  MIGRATE_OPTION(citydlg_ysize);
+  MIGRATE_OPTION(popup_tech_help);
+
+  MIGRATE_STR_OPTION(font_city_label);
+  MIGRATE_STR_OPTION(font_notify_label);
+  MIGRATE_STR_OPTION(font_spaceship_label);
+  MIGRATE_STR_OPTION(font_help_label);
+  MIGRATE_STR_OPTION(font_help_link);
+  MIGRATE_STR_OPTION(font_help_text);
+  MIGRATE_STR_OPTION(font_chatline);
+  MIGRATE_STR_OPTION(font_beta_label);
+  MIGRATE_STR_OPTION(font_small);
+  MIGRATE_STR_OPTION(font_comment_label);
+  MIGRATE_STR_OPTION(font_city_names);
+  MIGRATE_STR_OPTION(font_city_productions);
+  MIGRATE_STR_OPTION(font_reqtree_text);
+
+#undef MIGRATE_OPTION
+#undef MIGRATE_STR_OPTION
+
+  gui_options.gui_gtk3_migrated_from_gtk2 = TRUE;
+}
+
+/**********************************************************************//**
   Migrate gtk3.22 client specific options from gtk3 client options.
 **************************************************************************/
 static void migrate_options_from_gtk3(void)
@@ -1663,6 +1757,14 @@ static void migrate_options_from_gtk3(void)
           sizeof(GUI_GTK_OPTION(opt)));
 
   /* Default theme name is never migrated */
+
+  /* Simulate gui-gtk3's migrate_options_from_2_5() */
+  if (!gui_options.gui_gtk3_migrated_from_2_5) {
+    log_normal(_("Migrating gtk3-client options from freeciv-2.5 options."));
+    gui_options.gui_gtk3_fullscreen = gui_options.migrate_fullscreen;
+    gui_options.gui_gtk3_migrated_from_2_5 = TRUE;
+  }
+
   MIGRATE_OPTION(fullscreen);
   MIGRATE_OPTION(map_scrollbars);
   MIGRATE_OPTION(dialogs_on_top);
@@ -1733,8 +1835,26 @@ void ui_main(int argc, char **argv)
   gtk_widget_set_name(toplevel, "Freeciv");
   root_window = gtk_widget_get_window(toplevel);
 
-  if (!GUI_GTK_OPTION(migrated_from_gtk3)) {
-    migrate_options_from_gtk3();
+  if (gui_options.first_boot) {
+    adjust_default_options();
+    /* We're using fresh defaults for this version of this client,
+     * so prevent any future migrations from other clients / versions */
+    GUI_GTK_OPTION(migrated_from_gtk3) = TRUE;
+    /* Avoid also marking gtk3 as migrated, so that it can have its own
+     * run of its adjust_default_options() if it is ever run (as a
+     * side effect of Gtk2->Gtk3 migration). */
+  } else {
+    if (!GUI_GTK_OPTION(migrated_from_gtk3)) {
+      if (!gui_options.gui_gtk3_migrated_from_gtk2) {
+        migrate_options_from_gtk2();
+        /* We want a fresh look at screen-size-related options after Gtk2 */
+        adjust_default_options();
+        /* We don't ever want to consider pre-2.6 fullscreen option again
+         * (even for gui-gtk3) */
+        gui_options.gui_gtk3_migrated_from_2_5 = TRUE;
+      }
+      migrate_options_from_gtk3();
+    }
   }
 
   if (GUI_GTK_OPTION(fullscreen)) {
@@ -2315,27 +2435,62 @@ void insert_client_build_info(char *outbuf, size_t outlen)
 }
 
 /**********************************************************************//**
-  Return width of the default screen
+  Return dimensions of primary monitor, if any
+  (in 'application pixels')
+**************************************************************************/
+static bool monitor_size(GdkRectangle *rect_p)
+{
+  GdkDisplay *display;
+  GdkMonitor *monitor;
+
+  display = gdk_display_get_default();
+  if (!display) {
+    return FALSE;
+  }
+
+  monitor = gdk_display_get_primary_monitor(display);
+  if (!monitor) {
+    return FALSE;
+  }
+
+  gdk_monitor_get_geometry(monitor, rect_p);
+  return TRUE;
+}
+
+/**********************************************************************//**
+  Return width of the primary monitor
 **************************************************************************/
 int screen_width(void)
 {
+  GdkRectangle rect;
+
   if (vmode.width > 0) {
     return vmode.width;
   }
 
-  return 0;
+  if (monitor_size(&rect)) {
+    return rect.width;
+  } else {
+    return 0;
+  }
 }
 
 /**********************************************************************//**
-  Return height of the default screen
+  Return height of the primary monitor
 **************************************************************************/
 int screen_height(void)
 {
+  GdkRectangle rect;
+
   if (vmode.height > 0) {
     return vmode.height;
   }
 
-  return 0;
+  if (monitor_size(&rect)) {
+    return rect.height;
+  } else {
+    return 0;
+  }
 }
 
 /**********************************************************************//**
@@ -2353,7 +2508,7 @@ struct video_mode *resolution_request_get(void)
 /**********************************************************************//**
   Make dynamic adjustments to first-launch default options.
 **************************************************************************/
-void adjust_default_options(void)
+static void adjust_default_options(void)
 {
   int scr_height = screen_height();
 
@@ -2363,10 +2518,15 @@ void adjust_default_options(void)
     if (scr_height <= 480) {
       /* Freeciv is practically unusable outside fullscreen mode in so
        * small display */
+      log_verbose("Changing default to fullscreen due to very small screen");
       GUI_GTK_OPTION(fullscreen) = TRUE;
-    } else if (scr_height >= 1024) {
-      /* This is no small display */
-      GUI_GTK_OPTION(small_display_layout) = FALSE;
+    }
+    if (scr_height < 1024) {
+      /* This is a small display */
+      log_verbose("Defaulting to small widget layout due to small screen");
+      GUI_GTK_OPTION(small_display_layout) = TRUE;
+      log_verbose("Defaulting to merged messages/chat due to small screen");
+      GUI_GTK_OPTION(message_chat_location) = GUI_GTK_MSGCHAT_MERGED;
     }
   }
 }

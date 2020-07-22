@@ -1350,7 +1350,9 @@ bool tilespec_reread(const char *new_tileset_name,
   }
 
   if (game_fully_initialized) {
-    tileset_background_init(tileset);
+    if (game.client.ruleset_ready) {
+      tileset_background_init(tileset);
+    } /* else we'll get round to it on PACKET_RULESET_GAME */
     players_iterate(pplayer) {
       tileset_player_init(tileset, pplayer);
     } players_iterate_end;
@@ -1916,6 +1918,7 @@ static struct tileset *tileset_read_toplevel(const char *tileset_name,
   t->ts_topo_idx = ts_topology_index(topo);
 
   if (!is_view_supported(t->type)) {
+    /* TRANS: "Overhead" or "Isometric" */
     log_normal(_("Client does not support %s tilesets."),
                _(ts_type_name(t->type)));
     log_normal(_("Using default tileset instead."));
@@ -3475,7 +3478,7 @@ static bool tileset_setup_unit_direction(struct tileset *t,
 /************************************************************************//**
   Try to setup all unit type sprites from single tag
 ****************************************************************************/
-bool static tileset_setup_unit_type_from_tag(struct tileset *t,
+static bool tileset_setup_unit_type_from_tag(struct tileset *t,
                                              int uidx, const char *tag)
 {
   bool has_icon, facing_sprites = TRUE;
@@ -4254,13 +4257,13 @@ static int fill_unit_sprite_array(const struct tileset *t,
 {
   struct drawn_sprite *save_sprs = sprs;
   int ihp;
-  struct unit_type *ptype = unit_type_get(punit);
+  const struct unit_type *ptype = unit_type_get(punit);
 
   if (backdrop) {
     if (!gui_options.solid_color_behind_units) {
       ADD_SPRITE(get_unit_nation_flag_sprite(t, punit), TRUE,
-		 FULL_TILE_X_OFFSET + t->unit_flag_offset_x,
-		 FULL_TILE_Y_OFFSET + t->unit_flag_offset_y);
+                 FULL_TILE_X_OFFSET + t->unit_flag_offset_x,
+                 FULL_TILE_Y_OFFSET + t->unit_flag_offset_y);
     } else {
       /* Taken care of in the LAYER_BACKGROUND. */
     }
@@ -4285,12 +4288,18 @@ static int fill_unit_sprite_array(const struct tileset *t,
         s = t->sprites.extras[extra_index(punit->activity_target)].activity;
       }
       break;
+    case ACTIVITY_PLANT:
+      s = t->sprites.unit.plant;
+      break;
     case ACTIVITY_IRRIGATE:
      if (punit->activity_target == NULL) {
         s = t->sprites.unit.irrigate;
       } else {
         s = t->sprites.extras[extra_index(punit->activity_target)].activity;
       }
+      break;
+    case ACTIVITY_CULTIVATE:
+      s = t->sprites.unit.irrigate;
       break;
     case ACTIVITY_POLLUTION:
     case ACTIVITY_FALLOUT:
@@ -4300,7 +4309,7 @@ static int fill_unit_sprite_array(const struct tileset *t,
       s = t->sprites.unit.pillage;
       break;
     case ACTIVITY_EXPLORE:
-      s = t->sprites.unit.auto_explore;
+      /* Drawn below as the server side agent. */
       break;
     case ACTIVITY_FORTIFIED:
       s = t->sprites.unit.fortified;
@@ -4334,11 +4343,32 @@ static int fill_unit_sprite_array(const struct tileset *t,
     }
   }
 
-  if (punit->ai_controlled && punit->activity != ACTIVITY_EXPLORE) {
-    if (is_military_unit(punit)) {
-      ADD_SPRITE_FULL(t->sprites.unit.auto_attack);
-    } else {
-      ADD_SPRITE_FULL(t->sprites.unit.auto_settler);
+  {
+    struct sprite *s = NULL;
+    int offset_x = 0;
+    int offset_y = 0;
+
+    switch (punit->ssa_controller) {
+    case SSA_NONE:
+      break;
+    case SSA_AUTOSETTLER:
+      s = t->sprites.unit.auto_settler;
+      break;
+    case SSA_AUTOEXPLORE:
+      s = t->sprites.unit.auto_explore;
+      /* Specified as an activity in the tileset. */
+      offset_x = t->activity_offset_x;
+      offset_y = t->activity_offset_y;
+      break;
+    default:
+      s = t->sprites.unit.auto_attack;
+      break;
+    }
+
+    if (s != NULL) {
+      ADD_SPRITE(s, TRUE,
+                 FULL_TILE_X_OFFSET + offset_x,
+                 FULL_TILE_Y_OFFSET + offset_y);
     }
   }
 
@@ -5878,18 +5908,19 @@ int fill_sprite_array(struct tileset *t,
     /* City size.  Drawing this under fog makes it hard to read. */
     if (pcity && gui_options.draw_cities && !gui_options.draw_full_citybar) {
       bool warn = FALSE;
+      unsigned int size = city_size_get(pcity);
 
-      ADD_SPRITE(t->sprites.city.size[city_size_get(pcity) % 10], FALSE,
+      ADD_SPRITE(t->sprites.city.size[size % 10], FALSE,
                  FULL_TILE_X_OFFSET + t->city_size_offset_x,
                  FULL_TILE_Y_OFFSET + t->city_size_offset_y);
-      if (10 <= city_size_get(pcity)) {
-        ADD_SPRITE(t->sprites.city.size_tens[(city_size_get(pcity) / 10) 
+      if (10 <= size) {
+        ADD_SPRITE(t->sprites.city.size_tens[(size / 10)
                    % 10], FALSE,
                    FULL_TILE_X_OFFSET + t->city_size_offset_x,
                    FULL_TILE_Y_OFFSET + t->city_size_offset_y);
-        if (100 <= city_size_get(pcity)) {
+        if (100 <= size) {
           struct sprite *sprite =
-              t->sprites.city.size_hundreds[(city_size_get(pcity) / 100) % 10];
+            t->sprites.city.size_hundreds[(size / 100) % 10];
 
           if (NULL != sprite) {
             ADD_SPRITE(sprite, FALSE,
@@ -5898,7 +5929,7 @@ int fill_sprite_array(struct tileset *t,
           } else {
             warn = TRUE;
           }
-          if (1000 <= city_size_get(pcity)) {
+          if (1000 <= size) {
             warn = TRUE;
           }
         }
@@ -5911,7 +5942,7 @@ int fill_sprite_array(struct tileset *t,
         if (0 != strcmp(last_reported, t->name)) {
           log_normal(_("Tileset \"%s\" doesn't support big cities size, "
                        "such as %d. Size not displayed as expected."),
-                     t->name, city_size_get(pcity));
+                     t->name, size);
           sz_strlcpy(last_reported, t->name);
         }
       }
@@ -5959,6 +5990,11 @@ int fill_sprite_array(struct tileset *t,
                          FULL_TILE_Y_OFFSET + t->activity_offset_y);
             }
             break;
+          case ACTIVITY_PLANT:
+            ADD_SPRITE(t->sprites.unit.plant,
+                       TRUE, FULL_TILE_X_OFFSET + t->activity_offset_x,
+                       FULL_TILE_Y_OFFSET + t->activity_offset_y);
+            break;
           case ACTIVITY_IRRIGATE:
             if (ptask->tgt == NULL) {
               ADD_SPRITE(t->sprites.unit.irrigate,
@@ -5969,6 +6005,11 @@ int fill_sprite_array(struct tileset *t,
                          TRUE, FULL_TILE_X_OFFSET + t->activity_offset_x,
                          FULL_TILE_Y_OFFSET + t->activity_offset_y);
             }
+            break;
+          case ACTIVITY_CULTIVATE:
+            ADD_SPRITE(t->sprites.unit.irrigate,
+                       TRUE, FULL_TILE_X_OFFSET + t->activity_offset_x,
+                       FULL_TILE_Y_OFFSET + t->activity_offset_y);
             break;
           case ACTIVITY_GEN_ROAD:
             ADD_SPRITE(t->sprites.extras[extra_index(ptask->tgt)].activity,
@@ -6004,6 +6045,18 @@ int fill_sprite_array(struct tileset *t,
       if (NULL != map_startpos_get(ptile)) {
         /* FIXME: Use a more representative sprite. */
         ADD_SPRITE_SIMPLE(t->sprites.user.attention);
+      }
+    }
+    break;
+
+  case LAYER_INFRAWORK:
+    if (ptile != NULL && ptile->placing != NULL) {
+      const int id = extra_index(ptile->placing);
+
+      if (t->sprites.extras[id].activity != NULL) {
+        ADD_SPRITE(t->sprites.extras[id].activity,
+                   TRUE, FULL_TILE_X_OFFSET + t->activity_offset_x,
+                   FULL_TILE_Y_OFFSET + t->activity_offset_y);
       }
     }
     break;
@@ -6295,7 +6348,7 @@ struct sprite *get_tech_sprite(const struct tileset *t, Tech_type_id tech)
   Return the sprite for the building/improvement.
 ****************************************************************************/
 struct sprite *get_building_sprite(const struct tileset *t,
-                                   struct impr_type *pimprove)
+                                   const struct impr_type *pimprove)
 {
   fc_assert_ret_val(NULL != pimprove, NULL);
   return t->sprites.building[improvement_index(pimprove)];
@@ -6586,6 +6639,7 @@ void tileset_use_preferred_theme(const struct tileset *t)
   case GUI_GTK3x:
     default_theme_name = gui_options.gui_gtk4_default_theme_name;
     default_theme_name_sz = sizeof(gui_options.gui_gtk4_default_theme_name);
+    break;
   case GUI_SDL2:
     default_theme_name = gui_options.gui_sdl2_default_theme_name;
     default_theme_name_sz = sizeof(gui_options.gui_sdl2_default_theme_name);
@@ -6854,6 +6908,7 @@ bool tileset_layer_in_category(enum mapview_layer layer,
   case LAYER_GOTO:
   case LAYER_WORKERTASK:
   case LAYER_EDITOR:
+  case LAYER_INFRAWORK:
     return FALSE;
   case LAYER_COUNT:
     break; /* and fail below */

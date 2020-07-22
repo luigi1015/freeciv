@@ -789,20 +789,6 @@ static bool save_effects_ruleset(const char *filename, const char *name)
 }
 
 /**********************************************************************//**
-  Auto attack should only require war, remaining movement and the absence
-  of blocking utype flags.
-**************************************************************************/
-static bool unexpected_auto_attack(const struct requirement *req)
-{
-  return !((req->source.kind == VUT_DIPLREL
-            && req->source.value.diplrel == DS_WAR
-            && req->present)
-           || (req->source.kind == VUT_MINMOVES
-               && req->source.value.minmoves == 1
-               && req->present));
-}
-
-/**********************************************************************//**
   Save ui_name of one action.
 **************************************************************************/
 static bool save_action_ui_name(struct section_file *sfile,
@@ -813,6 +799,95 @@ static bool save_action_ui_name(struct section_file *sfile,
   if (strcmp(ui_name, action_ui_name_default(act))) {
     secfile_insert_str(sfile, ui_name,
                        "actions.%s", entry_name);
+  }
+
+  return TRUE;
+}
+
+/**********************************************************************//**
+  Save max range of an action.
+**************************************************************************/
+static bool save_action_max_range(struct section_file *sfile,
+                                  action_id act)
+{
+  if (action_by_number(act)->max_distance
+      == ACTION_DISTANCE_UNLIMITED) {
+    return secfile_insert_str(sfile, RS_ACTION_NO_MAX_DISTANCE,
+                              "actions.%s",
+                              action_max_range_ruleset_var_name(act)) != NULL;
+  } else {
+    return save_default_int(sfile, action_by_number(act)->max_distance,
+                            action_max_range_default(act),
+                            "actions",
+                            action_max_range_ruleset_var_name(act));
+  }
+}
+
+/**********************************************************************//**
+  Save range of an action.
+**************************************************************************/
+static bool save_action_range(struct section_file *sfile, action_id act)
+{
+  if (action_min_range_ruleset_var_name(act) != NULL) {
+    /* Min range can be loaded from the ruleset. */
+    save_default_int(sfile,
+                     action_by_number(act)->min_distance,
+                     action_min_range_default(act),
+                     "actions", action_min_range_ruleset_var_name(act));
+  }
+
+  if (action_max_range_ruleset_var_name(act) != NULL) {
+    /* Max range can be loaded from the ruleset. */
+    if (!save_action_max_range(sfile, act)) {
+      return FALSE;
+    }
+  }
+
+  return TRUE;
+}
+
+/**********************************************************************//**
+  Save details of an action.
+**************************************************************************/
+static bool save_action_kind(struct section_file *sfile, action_id act)
+{
+  if (action_target_kind_ruleset_var_name(act) != NULL) {
+    /* Target kind can be loaded from the ruleset. */
+    if ((action_by_number(act)->target_kind
+         == RS_DEFAULT_USER_ACTION_TARGET_KIND)
+        && action_enabler_list_size(action_enablers_for_action(act)) == 0) {
+      /* Don't save the default for actions that aren't enabled. */
+      return TRUE;
+    }
+
+    secfile_insert_enum(sfile,
+                        action_by_number(act)->target_kind,
+                        action_target_kind,
+                        "actions.%s",
+                        action_target_kind_ruleset_var_name(act));
+  }
+
+  return TRUE;
+}
+
+/**********************************************************************//**
+  Save if an action always will consume the actor.
+**************************************************************************/
+static bool save_action_actor_consuming_always(struct section_file *sfile,
+                                               action_id act)
+{
+  if (action_actor_consuming_always_ruleset_var_name(act) != NULL) {
+    /* Actor consumption can be loaded from the ruleset. */
+    if (action_enabler_list_size(action_enablers_for_action(act)) == 0) {
+      /* Don't save value for actions that aren't enabled. */
+      return TRUE;
+    }
+
+    save_default_bool(sfile,
+                      action_by_number(act)->actor_consuming_always,
+                      RS_DEFAULT_ACTION_ACTOR_CONSUMING_ALWAYS,
+                      "actions",
+                      action_actor_consuming_always_ruleset_var_name(act));
   }
 
   return TRUE;
@@ -1026,13 +1101,29 @@ static bool save_game_ruleset(const char *filename, const char *name)
   save_default_int(sfile, game.server.incite_total_factor,
                    RS_DEFAULT_INCITE_TOTAL_FCT,
                    "incite_cost.total_factor", NULL);
-  save_default_bool(sfile, game.info.slow_invasions,
-                    RS_DEFAULT_SLOW_INVASIONS,
-                    "global_unit_options.slow_invasions", NULL);
 
-  save_action_auto_uflag_block(sfile, ACTION_AUTO_MOVED_ADJ,
-                               "auto_attack.will_never",
-                               unexpected_auto_attack);
+  {
+    /* Action auto performers aren't ready to be exposed in the ruleset
+     * yet. The behavior when two action auto performers for the same
+     * cause can fire isn't set in stone yet. How is one of them chosen?
+     * What if all the actions of the chosen action auto performer turned
+     * out to be illegal but one of the other action auto performers that
+     * fired has legal actions? These issues can decide what other action
+     * rules action auto performers can represent in the future. Deciding
+     * should therefore wait until a rule needs action auto performers to
+     * work a certain way. */
+    /* Only one action auto performer, ACTION_AUTO_MOVED_ADJ, is caused
+     * by AAPC_UNIT_MOVED_ADJ. It is therefore safe to expose the full
+     * requirement vector to the ruleset. */
+    const struct action_auto_perf *auto_perf =
+        action_auto_perf_by_number(ACTION_AUTO_MOVED_ADJ);
+
+    save_action_auto_actions(sfile, ACTION_AUTO_MOVED_ADJ,
+                             "auto_attack.attack_actions");
+
+    save_reqs_vector(sfile, &auto_perf->reqs,
+                     "auto_attack", "if_attacker");
+  }
 
   save_default_bool(sfile,
                     action_id_would_be_blocked_by(ACTION_MARKETPLACE,
@@ -1064,19 +1155,16 @@ static bool save_game_ruleset(const char *filename, const char *name)
                     RS_DEFAULT_POISON_EMPTIES_FOOD_STOCK,
                     "actions.poison_empties_food_stock", NULL);
 
-  if (action_by_number(ACTION_BOMBARD)->max_distance
-      == ACTION_DISTANCE_UNLIMITED) {
-    secfile_insert_str(sfile, RS_ACTION_NO_MAX_DISTANCE,
-                       "actions.bombard_max_range");
-  } else {
-    save_default_int(sfile, action_by_number(ACTION_BOMBARD)->max_distance,
-                     RS_DEFAULT_BOMBARD_MAX_RANGE,
-                     "actions.bombard_max_range", NULL);
-  }
+  save_default_bool(sfile, game.info.steal_maps_reveals_all_cities,
+                    RS_DEFAULT_STEAL_MAP_REVEALS_CITIES,
+                    "actions.steal_maps_reveals_all_cities", NULL);
 
   action_iterate(act_id) {
     save_action_ui_name(sfile,
                         act_id, action_ui_name_ruleset_var_name(act_id));
+    save_action_kind(sfile, act_id);
+    save_action_range(sfile, act_id);
+    save_action_actor_consuming_always(sfile, act_id);
   } action_iterate_end;
 
   i = 0;
@@ -1099,6 +1187,10 @@ static bool save_game_ruleset(const char *filename, const char *name)
   action_enablers_iterate(pae) {
     char path[512];
 
+    if (pae->disabled) {
+      continue;
+    }
+
     fc_snprintf(path, sizeof(path), "actionenabler_%d", sect_idx++);
 
     secfile_insert_str(sfile, action_id_rule_name(pae->action),
@@ -1114,10 +1206,10 @@ static bool save_game_ruleset(const char *filename, const char *name)
   save_default_bool(sfile, game.info.only_killing_makes_veteran,
                     RS_DEFAULT_ONLY_KILLING_VETERAN,
                     "combat_rules.only_killing_makes_veteran", NULL);
-  save_default_int(sfile, game.server.nuke_pop_loss_pct,
+  save_default_int(sfile, game.info.nuke_pop_loss_pct,
                     RS_DEFAULT_NUKE_POP_LOSS_PCT,
                     "combat_rules.nuke_pop_loss_pct", NULL);
-  save_default_int(sfile, game.server.nuke_defender_survival_chance_pct,
+  save_default_int(sfile, game.info.nuke_defender_survival_chance_pct,
                     RS_DEFAULT_NUKE_DEFENDER_SURVIVAL_CHANCE_PCT,
                     "combat_rules.nuke_defender_survival_chance_pct", NULL);
   save_default_int(sfile, game.info.border_city_radius_sq,
@@ -1333,6 +1425,8 @@ static bool save_game_ruleset(const char *filename, const char *name)
 
       secfile_insert_str(sfile, clause_type_name(info->type),
                          "%s.type", path);
+      save_reqs_vector(sfile, &(info->giver_reqs), path, "giver_reqs");
+      save_reqs_vector(sfile, &(info->receiver_reqs), path, "receiver_reqs");
     }
   }
 
@@ -2002,7 +2096,7 @@ static bool save_terrain_ruleset(const char *filename, const char *name)
                        "parameters.igter_cost");
   }
   if (terrain_control.pythagorean_diagonal != RS_DEFAULT_PYTHAGOREAN_DIAGONAL) {
-    secfile_insert_bool(sfile, TRUE,
+    secfile_insert_bool(sfile, terrain_control.pythagorean_diagonal,
                         "parameters.pythagorean_diagonal");
   }
   if (wld.map.server.ocean_resources) {
@@ -2099,6 +2193,8 @@ static bool save_terrain_ruleset(const char *filename, const char *name)
                          "%s.animal", path);
     }
 
+    secfile_insert_int(sfile, pterr->placing_time,
+                       "%s.placing_time", path);
     secfile_insert_int(sfile, pterr->pillage_time,
                        "%s.pillage_time", path);
     secfile_insert_int(sfile, pterr->clean_pollution_time,
@@ -2275,7 +2371,7 @@ static bool save_terrain_ruleset(const char *filename, const char *name)
     if (pextra->removal_time_factor != 1) {
       secfile_insert_int(sfile, pextra->removal_time_factor, "%s.removal_time_factor", path);
     }
-    if (pextra->infracost != 1) {
+    if (pextra->infracost != 0) {
       secfile_insert_int(sfile, pextra->infracost, "%s.infracost", path);
     }
     if (pextra->defense_bonus != 0) {
@@ -2663,15 +2759,39 @@ static bool save_units_ruleset(const char *filename, const char *name)
 
       save_tech_ref(sfile, put->require_advance, path, "tech_req");
 
-      if (put->need_government != NULL) {
-        secfile_insert_str(sfile, government_rule_name(put->need_government),
-                           "%s.gov_req", path);
-      }
+      /* Extract the government requirement from the requirement vector so
+       * it can be written in the old format.
+       * The build_reqs requirement vector isn't ready to be exposed in the
+       * ruleset yet. */
+      requirement_vector_iterate(&put->build_reqs, preq) {
+        if (preq->source.kind == VUT_GOVERNMENT) {
+          fc_assert_msg(preq->range == REQ_RANGE_PLAYER,
+                        "can't convert non player range to the rs format");
+          fc_assert_msg(preq->present == TRUE,
+                        "can't convert not present reqs to the rs format");
+          secfile_insert_str(sfile,
+                             universal_rule_name(&preq->source),
+                             "%s.gov_req", path);
+          break;
+        }
+      } requirement_vector_iterate_end;
 
-      if (put->need_improvement != NULL) {
-        secfile_insert_str(sfile, improvement_rule_name(put->need_improvement),
-                           "%s.impr_req", path);
-      }
+      /* Extract the improvement requirement from the requirement vector so
+       * it can be written in the old format.
+       * The build_reqs requirement vector isn't ready to be exposed in the
+       * ruleset yet. */
+      requirement_vector_iterate(&put->build_reqs, preq) {
+        if (preq->source.kind == VUT_IMPROVEMENT) {
+          fc_assert_msg(preq->range == REQ_RANGE_CITY,
+                        "can't convert non player range to the rs format");
+          fc_assert_msg(preq->present == TRUE,
+                        "can't convert not present reqs to the rs format");
+          secfile_insert_str(sfile,
+                             universal_rule_name(&preq->source),
+                             "%s.impr_req", path);
+          break;
+        }
+      } requirement_vector_iterate_end;
 
       if (put->obsoleted_by != NULL) {
         secfile_insert_str(sfile, utype_rule_name(put->obsoleted_by),
@@ -2742,10 +2862,6 @@ static bool save_units_ruleset(const char *filename, const char *name)
       if (put->paratroopers_range != 0) {
         secfile_insert_int(sfile, put->paratroopers_range,
                            "%s.paratroopers_range", path);
-        secfile_insert_int(sfile, put->paratroopers_mr_req / SINGLE_MOVE,
-                           "%s.paratroopers_mr_req", path);
-        secfile_insert_int(sfile, put->paratroopers_mr_sub / SINGLE_MOVE,
-                           "%s.paratroopers_mr_sub", path);
       }
       if (put->bombard_rate != 0) {
         secfile_insert_int(sfile, put->bombard_rate,

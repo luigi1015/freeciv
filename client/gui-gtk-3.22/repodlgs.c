@@ -553,7 +553,7 @@ static void science_report_init(struct science_report *preport)
   /* TRANS: Research report title */
   gui_dialog_set_title(preport->shell, _("Research"));
 
-  gui_dialog_add_button(preport->shell, "window-close", _("Close"),
+  gui_dialog_add_button(preport->shell, "window-close", _("_Close"),
                         GTK_RESPONSE_CLOSE);
   gui_dialog_set_default_response(preport->shell, GTK_RESPONSE_CLOSE);
 
@@ -938,7 +938,7 @@ static void economy_report_command_callback(struct gui_dialog *pdialog,
   switch (selected.kind) {
   case VUT_IMPROVEMENT:
     {
-      struct impr_type *pimprove = selected.value.building;
+      const struct impr_type *pimprove = selected.value.building;
 
       if (can_sell_building(pimprove)
           && (ERD_RES_SELL_ALL == response
@@ -977,7 +977,7 @@ static void economy_report_command_callback(struct gui_dialog *pdialog,
   case VUT_UTYPE:
     {
       if (ERD_RES_DISBAND_UNITS == response) {
-        struct unit_type *putype = selected.value.utype;
+        const struct unit_type *putype = selected.value.utype;
         gint count;
         gtk_tree_model_get(model, &iter, ERD_COL_COUNT, &count, -1);
 
@@ -1151,7 +1151,7 @@ static void economy_report_init(struct economy_report *preport)
   gtk_widget_set_margin_bottom(label, 5);
   preport->label = GTK_LABEL(label);
 
-  gui_dialog_add_button(preport->shell, "window-close", _("Close"),
+  gui_dialog_add_button(preport->shell, "window-close", _("_Close"),
                         GTK_RESPONSE_CLOSE);
 
   button = gui_dialog_add_button(preport->shell, NULL, _("_Disband"),
@@ -1498,7 +1498,7 @@ static struct unit *find_nearest_unit(const struct unit_type *utype,
           && FOCUS_AVAIL == punit->client.focus_status
           && 0 < punit->moves_left
           && !punit->done_moving
-          && !punit->ai_controlled) {
+          && punit->ssa_controller == SSA_NONE) {
         dist = sq_map_distance(unit_tile(punit), ptile);
         if (dist < best_dist) {
           best_candidate = punit;
@@ -1559,7 +1559,7 @@ static void units_report_command_callback(struct gui_dialog *pdialog,
     }
   } else if (can_client_issue_orders()) {
     GtkWidget *shell;
-    struct unit_type *upgrade = can_upgrade_unittype(client_player(), utype);
+    const struct unit_type *upgrade = can_upgrade_unittype(client_player(), utype);
     char buf[1024];
     int price = unit_upgrade_price(client_player(), utype, upgrade);
 
@@ -1673,7 +1673,7 @@ static void units_report_init(struct units_report *preport)
     }
   }
 
-  gui_dialog_add_button(preport->shell, "window-close", _("Close"),
+  gui_dialog_add_button(preport->shell, "window-close", _("_Close"),
                         GTK_RESPONSE_CLOSE);
 
   button = gui_dialog_add_button(preport->shell, NULL, _("_Upgrade"),

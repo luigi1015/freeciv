@@ -1397,6 +1397,7 @@ bool map_fractal_generate(bool autosize, struct unit_type *initial_unit)
       fc_assert_msg(FALSE,
                     "Fair island generator failed to allocated "
                     "start positions!");
+      break;
     case MAPGEN_SCENARIO:
     case MAPGEN_RANDOM:
     case MAPGEN_FRACTURE:
@@ -1474,15 +1475,15 @@ bool map_fractal_generate(bool autosize, struct unit_type *initial_unit)
 static void adjust_terrain_param(void)
 {
   int polar = 2 * ICE_BASE_LEVEL * wld.map.server.landpercent / MAX_COLATITUDE;
-  float factor = (100.0 - polar - wld.map.server.steepness * 0.8 ) / 10000;
+  float mount_factor = (100.0 - polar - 30 * 0.8) / 10000;
+  float factor = (100.0 - polar - wld.map.server.steepness * 0.8) / 10000;
 
-
-  mountain_pct = factor * wld.map.server.steepness * 90;
+  mountain_pct = mount_factor * wld.map.server.steepness * 90;
 
   /* 27 % if wetness == 50 & */
-  forest_pct = factor * (wld.map.server.wetness * 40 + 700) ; 
-  jungle_pct = forest_pct * (MAX_COLATITUDE - TROPICAL_LEVEL) /
-               (MAX_COLATITUDE * 2);
+  forest_pct = factor * (wld.map.server.wetness * 40 + 700);
+  jungle_pct = forest_pct * (MAX_COLATITUDE - TROPICAL_LEVEL)
+    / (MAX_COLATITUDE * 2);
   forest_pct -= jungle_pct;
 
   /* 3 - 11 % */
@@ -1492,7 +1493,7 @@ static void adjust_terrain_param(void)
   swamp_pct = factor * MAX(0, (wld.map.server.wetness * 12 - 150
                                + wld.map.server.temperature * 10));
   desert_pct = factor * MAX(0, (wld.map.server.temperature * 15 - 250
-                                + (100 - wld.map.server.wetness) * 10)) ;
+                                + (100 - wld.map.server.wetness) * 10));
 }
 
 /**********************************************************************//**
@@ -1504,14 +1505,14 @@ static bool near_safe_tiles(struct tile *ptile)
   square_iterate(&(wld.map), ptile, 1, tile1) {
     if (!terrain_has_flag(tile_terrain(tile1), TER_UNSAFE_COAST)) {
       return TRUE;
-    }	
+    }
   } square_iterate_end;
 
   return FALSE;
 }
 
 /**********************************************************************//**
-  this function spreads out huts on the map, a position can be used for a
+  This function spreads out huts on the map, a position can be used for a
   hut if there isn't another hut close and if it's not on the ocean.
 **************************************************************************/
 static void make_huts(int number)
@@ -3541,6 +3542,7 @@ static bool map_generate_fair_islands(void)
       switch (wld.map.server.team_placement) {
       case TEAM_PLACEMENT_DISABLED:
         fc_assert(wld.map.server.team_placement != TEAM_PLACEMENT_DISABLED);
+        break;
       case TEAM_PLACEMENT_CLOSEST:
       case TEAM_PLACEMENT_CONTINENT:
         for (j = 0; j < wld.map.num_iterate_outwards_indices; j++) {

@@ -23,7 +23,7 @@ extern "C" {
 /* server */
 #include "ruleset.h"
 
-#define RULESET_COMPAT_CAP "+Freeciv-ruleset-Devel-2015.January.14"
+#define RULESET_COMPAT_CAP "+Freeciv-3.0-ruleset"
 
 struct rscompat_info
 {
@@ -50,6 +50,10 @@ bool rscompat_names(struct rscompat_info *info);
 
 void rscompat_postprocess(struct rscompat_info *info);
 
+/* General upgrade functions that should be kept to avoid regressions in
+ * corner case handling. */
+void rscompat_enablers_add_obligatory_hard_reqs(void);
+
 /* Functions from ruleset.c made visible to rscompat.c */
 struct requirement_vector *lookup_req_list(struct section_file *file,
                                            struct rscompat_info *compat,
@@ -58,6 +62,10 @@ struct requirement_vector *lookup_req_list(struct section_file *file,
                                            const char *rfor);
 
 /* Functions specific to 3.0 -> 3.1 transition */
+bool rscompat_auto_attack_3_1(struct rscompat_info *compat,
+                              struct action_auto_perf *auto_perf,
+                              size_t psize,
+                              enum unit_type_flag_id *protecor_flag);
 const char *rscompat_req_type_name_3_1(const char *type, const char *range,
                                        bool survives, bool present,
                                        bool quiet, const char *value);
@@ -69,6 +77,8 @@ bool rscompat_old_effect_3_1(const char *type, struct section_file *file,
                              const char *sec_name, struct rscompat_info *compat);
 void rscompat_extra_adjust_3_1(struct rscompat_info *compat,
                                struct extra_type *pextra);
+bool rscompat_old_slow_invasions_3_1(struct rscompat_info *compat,
+                                     bool slow_invasions);
 
 #ifdef __cplusplus
 }

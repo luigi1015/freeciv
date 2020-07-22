@@ -503,8 +503,6 @@ static struct Diplomacy_notebook *diplomacy_main_create(void)
     /* Responces for _all_ meetings. */
     gui_dialog_response_set_callback(dipl_main->dialog,
                                      diplomacy_main_response);
-    gui_dialog_set_default_response(dipl_main->dialog,
-                                    RESPONSE_CANCEL_MEETING_ALL);
 
     dipl_box = dipl_main->dialog->vbox;
     gtk_container_add(GTK_CONTAINER(dipl_box), dipl_sw);
@@ -541,7 +539,7 @@ static void diplomacy_main_response(struct gui_dialog *dlg, int response,
   switch (response) {
   default:
     log_error("unhandled response in %s: %d", __FUNCTION__, response);
-    /* No break. */
+    fc__fallthrough; /* No break. */
   case GTK_RESPONSE_DELETE_EVENT:   /* GTK: delete the widget. */
   case RESPONSE_CANCEL_MEETING_ALL: /* Cancel all meetings. */
     dialog_list_iterate(dialog_list, adialog) {
@@ -605,7 +603,7 @@ static void diplomacy_response(struct gui_dialog *dlg, int response,
 
   default:
     log_error("unhandled response in %s: %d", __FUNCTION__, response);
-    /* No break. */
+    fc__fallthrough; /* No break. */
   case GTK_RESPONSE_DELETE_EVENT:   /* GTK: delete the widget. */
   case GTK_RESPONSE_CANCEL:         /* GTK: cancel button. */
   case RESPONSE_CANCEL_MEETING:     /* Cancel meetings. */
@@ -658,7 +656,6 @@ static struct Diplomacy_dialog *create_diplomacy_dialog(struct player *plr0,
 
   /* Responces for one meeting. */
   gui_dialog_response_set_callback(pdialog->dialog, diplomacy_response);
-  gui_dialog_set_default_response(pdialog->dialog, RESPONSE_CANCEL_MEETING);
 
   /* Label for the new meeting. */
   buf = g_strdup_printf("%s", nation_plural_for_player(plr1));
@@ -1122,7 +1119,7 @@ void close_diplomacy_dialog(struct Diplomacy_dialog *pdialog)
 /************************************************************************//**
   Initialize diplomacy dialog
 ****************************************************************************/
-void diplomacy_dialog_init()
+void diplomacy_dialog_init(void)
 {
   dialog_list = dialog_list_new();
   dipl_main = NULL;
@@ -1131,7 +1128,7 @@ void diplomacy_dialog_init()
 /************************************************************************//**
   Free resources allocated for diplomacy dialog
 ****************************************************************************/
-void diplomacy_dialog_done()
+void diplomacy_dialog_done(void)
 {
   dialog_list_destroy(dialog_list);
 }

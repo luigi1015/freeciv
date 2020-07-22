@@ -820,8 +820,9 @@ static struct cityresult *settler_map_iterate(struct ai_type *ait,
     /* Reduce want by settler cost. Easier than amortize, but still
      * weeds out very small wants. ie we create a threshold here. */
     /* We also penalise here for using a boat (either virtual or real)
-     * it's crude but what isn't? */
-    cr->result -= unit_build_shield_cost_base(punit) + boat_cost;
+     * it's crude but what isn't?
+     * Settler gets used, boat can make multiple trips. */
+    cr->result -= unit_build_shield_cost_base(punit) + boat_cost / 3;
 
     /* Find best spot */
     if ((!best && cr->result > 0)
@@ -1011,7 +1012,7 @@ void dai_auto_settler_init(struct ai_plr *ai)
 void dai_auto_settler_run(struct ai_type *ait, struct player *pplayer,
                           struct unit *punit, struct settlermap *state)
 {
-  int best_impr = 0;            /* best terrain improvement we can do */
+  adv_want best_impr = 0; /* value of best terrain improvement we can do */
   enum unit_activity best_act;
   struct extra_type *best_target;
   struct tile *best_tile = NULL;
@@ -1096,7 +1097,7 @@ BUILD_CITY:
         completion_time = pf_path_last_position(path)->turn;
       }
     }
-    UNIT_LOG(LOG_DEBUG, punit, "impr want %d", best_impr);
+    UNIT_LOG(LOG_DEBUG, punit, "impr want " ADV_WANT_PRINTF, best_impr);
     TIMING_LOG(AIT_WORKERS, TIMER_STOP);
   }
 

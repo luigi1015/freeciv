@@ -153,7 +153,13 @@ bool unit_can_defend_here(const struct civ_map *nmap, const struct unit *punit)
    * Even transported units may step out from transport to fight,
    * if this is their native terrain. */
   return (can_unit_exist_at_tile(nmap, punit, unit_tile(punit))
-          && (ptrans == NULL || can_unit_unload(punit, ptrans)));
+          && (ptrans == NULL
+              /* Don't care if unloaded by the transport or alight itself */
+              /* FIXME: should being able to be unloaded by the transport
+               * count as being able to defend (like it does now) or should
+               * a unit that can't alight be considered useless as a
+               * defender? */
+              || can_unit_alight_or_be_unloaded(punit, ptrans)));
 }
 
 /************************************************************************//**
@@ -163,6 +169,8 @@ bool unit_can_defend_here(const struct civ_map *nmap, const struct unit *punit)
 bool can_attack_non_native(const struct unit_type *utype)
 {
   return uclass_has_flag(utype_class(utype), UCF_ATTACK_NON_NATIVE)
+         && (utype_can_do_action_result(utype, ACTRES_ATTACK)
+             || utype_can_do_action_result(utype, ACTRES_BOMBARD))
          && utype->attack_strength > 0
          && !utype_has_flag(utype, UTYF_ONLY_NATIVE_ATTACK);
 }
@@ -177,6 +185,8 @@ bool can_attack_from_non_native(const struct unit_type *utype)
                                        USP_NATIVE_TILE, FALSE)
           || utype_can_do_act_when_ustate(utype, ACTION_SUICIDE_ATTACK,
                                           USP_NATIVE_TILE, FALSE)
+          || utype_can_do_act_when_ustate(utype, ACTION_CONQUER_CITY2,
+                                          USP_LIVABLE_TILE, FALSE)
           || utype_can_do_act_when_ustate(utype, ACTION_CONQUER_CITY,
                                           USP_LIVABLE_TILE, FALSE));
 }
@@ -227,7 +237,7 @@ bool is_city_channel_tile(const struct unit_class *punitclass,
 /************************************************************************//**
   Return TRUE iff a unit of the given unit type can "exist" at this location.
   This means it can physically be present on the tile (without the use of a
-  transporter). See also can_unit_survive_at_tile.
+  transporter). See also can_unit_survive_at_tile().
 ****************************************************************************/
 bool can_exist_at_tile(const struct civ_map *nmap,
                        const struct unit_type *utype,
@@ -256,7 +266,7 @@ bool can_exist_at_tile(const struct civ_map *nmap,
 /************************************************************************//**
   Return TRUE iff the unit can "exist" at this location.  This means it can
   physically be present on the tile (without the use of a transporter).  See
-  also can_unit_survive_at_tile.
+  also can_unit_survive_at_tile().
 ****************************************************************************/
 bool can_unit_exist_at_tile(const struct civ_map *nmap,
                             const struct unit *punit,
@@ -423,11 +433,11 @@ bool is_native_near_tile(const struct civ_map *nmap,
 /************************************************************************//**
   Return TRUE iff the unit can "survive" at this location.  This means it can
   not only be physically present at the tile but will be able to survive
-  indefinitely on its own (without a transporter).  Units that require fuel
+  indefinitely on its own (without a transporter). Units that require fuel
   or have a danger of drowning are examples of non-survivable units.  See
   also can_unit_exist_at_tile().
 
-  (This function could be renamed as unit_wants_transporter.)
+  (This function could be renamed as unit_wants_transporter().)
 ****************************************************************************/
 bool can_unit_survive_at_tile(const struct civ_map *nmap,
                               const struct unit *punit,
@@ -443,6 +453,11 @@ bool can_unit_survive_at_tile(const struct civ_map *nmap,
 
   if (tile_has_refuel_extra(ptile, unit_type_get(punit))) {
     /* Unit can always survive at refueling base */
+    return TRUE;
+  }
+
+  if (unit_has_type_flag(punit, UTYF_COAST) && is_safe_ocean(nmap, ptile)) {
+    /* Refueling coast */
     return TRUE;
   }
 
@@ -494,31 +509,6 @@ bool can_step_taken_wrt_to_zoc(const struct unit_type *punittype,
 
   return (is_my_zoc(unit_owner, src_tile, zmap)
 	  || is_my_zoc(unit_owner, dst_tile, zmap));
-}
-
-/************************************************************************//**
-  See can_step_take_wrt_to_zoc().  This function is exactly the same but
-  it takes a unit instead of a unittype and player.
-****************************************************************************/
-static bool zoc_ok_move_gen(const struct unit *punit,
-                            const struct tile *src_tile,
-                            const struct tile *dst_tile,
-                            const struct civ_map *zmap)
-{
-  return can_step_taken_wrt_to_zoc(unit_type_get(punit), unit_owner(punit),
-				   src_tile, dst_tile, zmap);
-}
-
-/************************************************************************//**
-  Returns whether the unit can safely move from its current position to
-  the adjacent dst_tile.  This function checks only ZOC.
-
-  See can_step_taken_wrt_to_zoc().
-****************************************************************************/
-bool zoc_ok_move(const struct unit *punit, const struct tile *dst_tile,
-                 const struct civ_map *zmap)
-{
-  return zoc_ok_move_gen(punit, unit_tile(punit), dst_tile, zmap);
 }
 
 /************************************************************************//**

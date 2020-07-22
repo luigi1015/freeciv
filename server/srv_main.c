@@ -300,10 +300,13 @@ void srv_init(void)
   Handle client info packet
 **************************************************************************/
 void handle_client_info(struct connection *pc, enum gui_type gui,
-                        const char *distribution)
+                        int emerg_version, const char *distribution)
 {
   pc->client_gui = gui;
   log_debug("%s's client has %s gui.", pc->username, gui_type_name(gui));
+  if (emerg_version > 0) {
+    log_debug("It's emergency release .%d", emerg_version);
+  }
   if (strcmp(distribution, "")) {
     log_debug("It comes from %s distribution.", distribution);
   }
@@ -1204,6 +1207,42 @@ static void begin_phase(bool is_new_phase)
   if (is_new_phase) {
     /* Unit "end of turn" activities - of course these actually go at
      * the start of the turn! */
+    whole_map_iterate(&(wld.map), ptile) {
+      if (ptile->placing != NULL) {
+        struct player *owner = NULL;
+
+        if (game.info.borders != BORDERS_DISABLED) {
+          owner = tile_owner(ptile);
+        } else {
+          struct city *pcity = tile_worked(ptile);
+
+          if (pcity != NULL) {
+            owner = city_owner(pcity);
+          }
+        }
+
+        if (owner == NULL) {
+          /* Abandoned extra placing, clear it. */
+          ptile->placing = NULL;
+        } else {
+          if (is_player_phase(owner, game.info.phase)) {
+            fc_assert(ptile->infra_turns > 0);
+
+            ptile->infra_turns--;
+            if (ptile->infra_turns <= 0) {
+              create_extra(ptile, ptile->placing, owner);
+              ptile->placing = NULL;
+
+              /* Since extra has been added, tile is certainly
+               * sent by update_tile_knowledge() including the
+               * placing info, though it would not sent it if placing
+               * were the only thing changed. */
+              update_tile_knowledge(ptile);
+            }
+          }
+        }
+      }
+    } whole_map_iterate_end;
     phase_players_iterate(pplayer) {
       update_unit_activities(pplayer);
       flush_packets();
@@ -1363,7 +1402,7 @@ static void end_phase(void)
     research_get(pplayer)->got_tech_multi = FALSE;
   } phase_players_iterate_end;
 
-  phase_players_iterate(pplayer) {
+  alive_phase_players_iterate(pplayer) {
     do_tech_parasite_effect(pplayer);
     player_restore_units(pplayer);
 
@@ -1382,7 +1421,7 @@ static void end_phase(void)
      * check for finished research */
     update_bulbs(pplayer, -player_tech_upkeep(pplayer), TRUE);
     flush_packets();
-  } phase_players_iterate_end;
+  } alive_phase_players_iterate_end;
 
   /* Some player/global effect may have changed cities' vision range */
   phase_players_iterate(pplayer) {
@@ -1765,7 +1804,6 @@ void server_quit(void)
   generator_free();
   close_connections_and_socket();
   rulesets_deinit();
-  ruleset_choices_free();
   CALL_FUNC_EACH_AI(module_close);
   timing_log_free();
   registry_module_close();
@@ -3335,7 +3373,6 @@ void server_game_free(void)
 void srv_main(void)
 {
   fc_interface_init_server();
-  advisors_init();
 
   srv_prepare();
 
@@ -3480,6 +3517,36 @@ bool server_ss_val_bool_get(server_setting_id id)
 }
 
 /**********************************************************************//**
+  Returns the value of the integer server setting with the specified id.
+**************************************************************************/
+int server_ss_val_int_get(server_setting_id id)
+{
+  struct setting *pset = setting_by_number(id);
+
+  if (pset) {
+    return setting_int_get(pset);
+  } else {
+    log_error("No server setting with the id %d exists.", id);
+    return 0;
+  }
+}
+
+/**********************************************************************//**
+  Returns the value of the bitwise server setting with the specified id.
+**************************************************************************/
+unsigned int server_ss_val_bitwise_get(server_setting_id id)
+{
+  struct setting *pset = setting_by_number(id);
+
+  if (pset) {
+    return setting_bitwise_get(pset);
+  } else {
+    log_error("No server setting with the id %d exists.", id);
+    return FALSE;
+  }
+}
+
+/**********************************************************************//**
   Initialize server specific functions.
 **************************************************************************/
 static void fc_interface_init_server(void)
@@ -3490,6 +3557,8 @@ static void fc_interface_init_server(void)
   funcs->server_setting_name_get = server_ss_name_get;
   funcs->server_setting_type_get = server_ss_type_get;
   funcs->server_setting_val_bool_get = server_ss_val_bool_get;
+  funcs->server_setting_val_int_get = server_ss_val_int_get;
+  funcs->server_setting_val_bitwise_get = server_ss_val_bitwise_get;
   funcs->create_extra = create_extra;
   funcs->destroy_extra = destroy_extra;
   funcs->player_tile_vision_get = map_is_known_and_seen;

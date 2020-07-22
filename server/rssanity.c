@@ -15,6 +15,9 @@
 #include <fc_config.h>
 #endif
 
+/* utility */
+#include "deprecations.h"
+
 /* common */
 #include "achievements.h"
 #include "actions.h"
@@ -154,7 +157,8 @@ static bool sanity_check_req_individual(struct requirement *preq,
      * It can't be done in req_from_str(), as we may not have
      * loaded all building information at that time. */
     {
-      struct impr_type *pimprove = preq->source.value.building;
+      const struct impr_type *pimprove = preq->source.value.building;
+
       if (preq->range == REQ_RANGE_WORLD && !is_great_wonder(pimprove)) {
         log_error("%s: World-ranged requirement not supported for "
                   "%s (only great wonders supported)", list_for,
@@ -277,9 +281,11 @@ static bool sanity_check_req_set(int reqs_of_type[], int local_reqs_of_type[],
      case VUT_UTYPE:
      case VUT_UCLASS:
      case VUT_ACTION:
+     case VUT_ACTIVITY:
      case VUT_OTYPE:
      case VUT_SPECIALIST:
      case VUT_MINSIZE: /* Breaks nothing, but has no sense either */
+     case VUT_MINFOREIGNPCT:
      case VUT_MINMOVES: /* Breaks nothing, but has no sense either */
      case VUT_MINVETERAN: /* Breaks nothing, but has no sense either */
      case VUT_MINHP: /* Breaks nothing, but has no sense either */
@@ -287,9 +293,9 @@ static bool sanity_check_req_set(int reqs_of_type[], int local_reqs_of_type[],
      case VUT_MINCALFRAG:
      case VUT_AI_LEVEL:
      case VUT_TERRAINALTER: /* Local range only */
-     case VUT_CITYTILE:
      case VUT_STYLE:
      case VUT_IMPR_GENUS:
+     case VUT_CITYSTATUS:
        /* There can be only one requirement of these types (with current
         * range limitations)
         * Requirements might be identical, but we consider multiple
@@ -356,6 +362,7 @@ static bool sanity_check_req_set(int reqs_of_type[], int local_reqs_of_type[],
      case VUT_TECHFLAG:
      case VUT_IMPROVEMENT:
      case VUT_UNITSTATE:
+     case VUT_CITYTILE:
      case VUT_GOOD:
        /* Can check different properties. */
      case VUT_UTFLAG:
@@ -404,6 +411,7 @@ static bool sanity_check_req_vec(const struct requirement_vector *preqs,
                                  bool conjunctive, int max_tiles,
                                  const char *list_for)
 {
+  struct req_vec_problem *problem;
   int reqs_of_type[VUT_COUNT];
   int local_reqs_of_type[VUT_COUNT];
 
@@ -416,16 +424,15 @@ static bool sanity_check_req_vec(const struct requirement_vector *preqs,
                               conjunctive, max_tiles, list_for)) {
       return FALSE;
     }
-    requirement_vector_iterate(preqs, nreq) {
-      if (are_requirements_contradictions(preq, nreq)) {
-        log_error("%s: Requirements {%s} and {%s} contradict each other.",
-                  list_for,
-                  req_to_fstring(preq),
-                  req_to_fstring(nreq));
-        return FALSE;
-      }
-    } requirement_vector_iterate_end;
   } requirement_vector_iterate_end;
+
+  problem = req_vec_get_first_contradiction(preqs,
+                                            req_vec_vector_number, preqs);
+  if (problem != NULL) {
+    log_error("%s: %s.", list_for, problem->description);
+    req_vec_problem_free(problem);
+    return FALSE;
+  }
 
   return TRUE;
 }
@@ -437,6 +444,56 @@ static bool effect_list_sanity_cb(struct effect *peffect, void *data)
 {
   int one_tile = -1; /* TODO: Determine correct value from effect.
                       *       -1 disables checking */
+
+  if (peffect->type == EFT_ACTION_SUCCESS_TARGET_MOVE_COST) {
+    /* Only unit targets can pay in move fragments. */
+    requirement_vector_iterate(&peffect->reqs, preq) {
+      if (preq->source.kind == VUT_ACTION) {
+        if (action_get_target_kind(preq->source.value.action) != ATK_UNIT) {
+          /* TODO: support for ATK_UNITS could be added. That would require
+           * manually calling action_success_target_pay_mp() in each
+           * supported unit stack targeted action performer (like
+           * action_consequence_success() does) or to have the unit stack
+           * targeted actions return a list of targets. */
+          log_error("The effect Action_Success_Target_Move_Cost has the"
+                    " requirement {%s} but the action %s isn't"
+                    " (single) unit targeted.",
+                    req_to_fstring(preq),
+                    universal_rule_name(&preq->source));
+          return FALSE;
+        }
+      }
+    } requirement_vector_iterate_end;
+  } else if (peffect->type == EFT_ACTION_SUCCESS_MOVE_COST) {
+    /* Only unit actors can pay in move fragments. */
+    requirement_vector_iterate(&peffect->reqs, preq) {
+      if (preq->source.kind == VUT_ACTION && preq->present) {
+        if (action_get_actor_kind(preq->source.value.action) != AAK_UNIT) {
+          log_error("The effect Action_Success_Actor_Move_Cost has the"
+                    " requirement {%s} but the action %s isn't"
+                    " performed by a unit.",
+                    req_to_fstring(preq),
+                    universal_rule_name(&preq->source));
+          return FALSE;
+        }
+      }
+    } requirement_vector_iterate_end;
+  } else if (peffect->type == EFT_ACTION_ODDS_PCT) {
+    /* Catch trying to set Action_Odds_Pct for non supported actions. */
+    requirement_vector_iterate(&peffect->reqs, preq) {
+      if (preq->source.kind == VUT_ACTION && preq->present) {
+        if (action_dice_roll_initial_odds(preq->source.value.action)
+            == ACTION_ODDS_PCT_DICE_ROLL_NA) {
+          log_error("The effect Action_Odds_Pct has the"
+                    " requirement {%s} but the action %s doesn't"
+                    " roll the dice to see if it fails.",
+                    req_to_fstring(preq),
+                    universal_rule_name(&preq->source));
+          return FALSE;
+        }
+      }
+    } requirement_vector_iterate_end;
+  }
 
   return sanity_check_req_vec(&peffect->reqs, TRUE, one_tile,
                               effect_type_name(peffect->type));
@@ -816,7 +873,7 @@ bool sanity_check_ruleset_data(bool ignore_retired)
   num_utypes = game.control.num_unit_types;
   unit_type_iterate(putype) {
     int chain_length = 0;
-    struct unit_type *upgraded = putype;
+    const struct unit_type *upgraded = putype;
 
     while (upgraded != NULL) {
       upgraded = upgraded->obsoleted_by;
@@ -1103,21 +1160,51 @@ bool sanity_check_ruleset_data(bool ignore_retired)
       } requirement_vector_iterate_end;
 
       if (!ignore_retired) {
-        /* Support for letting the following hard requirements be implicit
-         * were retired in Freeciv 3.0. Make sure that the opposite of each
-         * hard action requirement blocks all its action enablers. */
+        /* Support for letting some of the following hard requirements be
+         * implicit were retired in Freeciv 3.0. Others were retired later.
+         * Make sure that the opposite of each hard action requirement
+         * blocks all its action enablers. */
 
-        const char *error_message;
+        struct req_vec_problem *problem
+            = action_enabler_suggest_repair(enabler);
 
-        if ((error_message
-             = action_enabler_obligatory_reqs_missing(enabler))) {
-            ruleset_error(LOG_ERROR, error_message,
-                          action_id_rule_name(act));
-            ok = FALSE;
-          }
+        if (problem != NULL) {
+          ruleset_error(LOG_ERROR, "%s", problem->description);
+          ok = FALSE;
+        }
+
+        problem = action_enabler_suggest_improvement(enabler);
+        if (problem != NULL) {
+          /* There is a potential for improving this enabler. */
+          log_deprecation("%s", problem->description);
+        }
       }
     } action_enabler_list_iterate_end;
   } action_iterate_end;
+
+  /* Auto attack */
+  {
+    struct action_auto_perf *auto_perf;
+
+    auto_perf = action_auto_perf_slot_number(ACTION_AUTO_MOVED_ADJ);
+
+    action_auto_perf_actions_iterate(auto_perf, act_id) {
+      struct action *paction = action_by_number(act_id);
+
+      if (!(action_has_result(paction, ACTRES_CAPTURE_UNITS)
+            || action_has_result(paction, ACTRES_BOMBARD)
+            || action_has_result(paction, ACTRES_ATTACK))) {
+        /* Only allow removing and changing the order of old auto
+         * attack actions for now. Other actions need more testing and
+         * fixing of issues caused by a worst case action probability of
+         * 0%. */
+        ruleset_error(LOG_ERROR, "auto_attack: %s not supported in"
+                                 " attack_actions.",
+                      action_rule_name(paction));
+        ok = FALSE;
+      }
+    } action_auto_perf_actions_iterate_end;
+  }
 
   /* There must be basic city style for each nation style to start with */
   styles_iterate(pstyle) {
@@ -1246,8 +1333,8 @@ bool autoadjust_ruleset_data(void)
   /* Hard coded action blocking. */
   {
     const struct {
-      const enum gen_action blocked;
-      const enum gen_action blocker;
+      const enum action_result blocked;
+      const enum action_result blocker;
     } must_block[] = {
       /* Hard code that Help Wonder blocks Recycle Unit. This must be done
        * because caravan_shields makes it possible to avoid the
@@ -1268,36 +1355,39 @@ bool autoadjust_ruleset_data(void)
        * therefore get 100% of them by changing its production. This trick
        * makes the ability to select Recycle Unit when Help Wonder is legal
        * pointless. */
-      { ACTION_RECYCLE_UNIT, ACTION_HELP_WONDER },
+      { ACTRES_RECYCLE_UNIT, ACTRES_HELP_WONDER },
 
       /* Allowing regular disband when ACTION_HELP_WONDER or
        * ACTION_RECYCLE_UNIT is legal while ACTION_HELP_WONDER always
        * blocks ACTION_RECYCLE_UNIT doesn't work well with the force_*
        * semantics. Should move to the ruleset once it has blocked_by
        * semantics. */
-      { ACTION_DISBAND_UNIT, ACTION_HELP_WONDER },
-      { ACTION_DISBAND_UNIT, ACTION_RECYCLE_UNIT },
+      { ACTRES_DISBAND_UNIT, ACTRES_HELP_WONDER },
+      { ACTRES_DISBAND_UNIT, ACTRES_RECYCLE_UNIT },
 
       /* Hard code that the ability to perform a regular attack blocks city
        * conquest. Is redundant as long as the requirement that the target
        * tile has no units remains hard coded. Kept "just in case" that
        * changes. */
-      { ACTION_CONQUER_CITY, ACTION_ATTACK },
-      { ACTION_CONQUER_CITY, ACTION_SUICIDE_ATTACK },
+      { ACTRES_CONQUER_CITY, ACTRES_ATTACK },
     };
 
     int i;
 
     for (i = 0; i < ARRAY_SIZE(must_block); i++) {
-      enum gen_action blocked = must_block[i].blocked;
-      enum gen_action blocker = must_block[i].blocker;
+      enum action_result blocked_result = must_block[i].blocked;
+      enum action_result blocker_result = must_block[i].blocker;
 
-      if (!action_id_would_be_blocked_by(blocked, blocker)) {
-        log_verbose("Autoblocking %s with %s",
-                    action_id_rule_name(blocked),
-                    action_id_rule_name(blocker));
-        BV_SET(action_by_number(blocked)->blocked_by, blocker);
-      }
+      action_by_result_iterate (blocked, blocker_id, blocked_result) {
+        action_by_result_iterate (blocker, blocked_id, blocker_result) {
+          if (!action_would_be_blocked_by(blocked, blocker)) {
+            log_verbose("Autoblocking %s with %s",
+                        action_rule_name(blocked),
+                        action_rule_name(blocker));
+            BV_SET(blocked->blocked_by, blocker->id);
+          }
+        } action_by_result_iterate_end;
+      } action_by_result_iterate_end;
     }
   }
 

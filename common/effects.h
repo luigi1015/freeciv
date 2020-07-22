@@ -296,6 +296,22 @@ extern "C" {
 #define SPECENUM_VALUE116NAME "Attack_Bonus"
 #define SPECENUM_VALUE117 EFT_CONQUEST_TECH_PCT
 #define SPECENUM_VALUE117NAME "Conquest_Tech_Pct"
+#define SPECENUM_VALUE118 EFT_ACTION_SUCCESS_MOVE_COST
+#define SPECENUM_VALUE118NAME "Action_Success_Actor_Move_Cost"
+#define SPECENUM_VALUE119 EFT_ACTION_SUCCESS_TARGET_MOVE_COST
+#define SPECENUM_VALUE119NAME "Action_Success_Target_Move_Cost"
+#define SPECENUM_VALUE120 EFT_INFRA_POINTS
+#define SPECENUM_VALUE120NAME "Infra_Points"
+#define SPECENUM_VALUE121 EFT_FORTIFY_DEFENSE_BONUS
+#define SPECENUM_VALUE121NAME "Fortify_Defense_Bonus"
+#define SPECENUM_VALUE122 EFT_MAPS_STOLEN_PCT
+#define SPECENUM_VALUE122NAME "Maps_Stolen_Pct"
+#define SPECENUM_VALUE123 EFT_UNIT_SHIELD_VALUE_PCT
+#define SPECENUM_VALUE123NAME "Unit_Shield_Value_Pct"
+#define SPECENUM_VALUE124 EFT_CASUS_BELLI_COMPLETE
+#define SPECENUM_VALUE124NAME "Casus_Belli_Complete"
+#define SPECENUM_VALUE125 EFT_ILLEGAL_ACTION_HP_COST
+#define SPECENUM_VALUE125NAME "Illegal_Action_HP_Cost"
 /* keep this last */
 #define SPECENUM_COUNT EFT_COUNT
 #include "specenum_gen.h"
@@ -353,7 +369,7 @@ int effect_value_from_universals(enum effect_type type,
                                  struct universal *unis, size_t n_unis);
 
 bool is_building_replaced(const struct city *pcity,
-			  struct impr_type *pimprove,
+                          const struct impr_type *pimprove,
                           const enum req_problem_type prob_type);
 
 /* functions to know the bonuses a certain effect is granting */
@@ -418,7 +434,7 @@ bool building_has_effect(const struct impr_type *pimprove,
 int get_current_construction_bonus(const struct city *pcity,
                                    enum effect_type effect_type,
                                    const enum req_problem_type prob_type);
-int get_potential_improvement_bonus(struct impr_type *pimprove,
+int get_potential_improvement_bonus(const struct impr_type *pimprove,
                                     const struct city *pcity,
                                     enum effect_type effect_type,
                                     const enum req_problem_type prob_type);

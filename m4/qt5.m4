@@ -1,17 +1,15 @@
 # Detect Qt5 headers and libraries and set flag variables
 
-AC_ARG_VAR([MOCCMD], [QT 5 moc command (autodetected it if not set)])
-
 AC_DEFUN([FC_QT5],
 [
   if test "x$fc_qt5_usable" = "x" ; then
-    case $host_os in 
+    FC_QT5_CPPFLAGS="-DQT_DISABLE_DEPRECATED_BEFORE=0x050b00"
+    case $host_os in
     darwin*) FC_QT5_DARWIN;;
     *) FC_QT5_GENERIC;;
     esac
   fi
 ])
- 
 
 AC_DEFUN([FC_QT5_GENERIC],
 [
@@ -64,12 +62,12 @@ AC_DEFUN([FC_QT5_GENERIC],
 
   if test "x$qt5_libs" = "xyes" ; then
     AC_MSG_RESULT([found])
-    AC_MSG_CHECKING([for Qt >= 5.2])
-    FC_QT52_CHECK
+    AC_MSG_CHECKING([for Qt >= 5.11])
+    FC_QT5_VERSION_CHECK
   fi
 
   AC_LANG_POP([C++])
-  if test "x$fc_qt52" = "xyes" ; then
+  if test "x$fc_qt5_min_ver" = "xyes" ; then
     AC_MSG_RESULT([ok])
     FC_QT5_VALIDATE_MOC([fc_qt5_usable=true], [fc_qt5_usable=false])
   else
@@ -105,9 +103,9 @@ AC_DEFUN([FC_QT5_COMPILETEST],
   CPPFLAGS="$CPPFLAGS_SAVE"
 ])
 
-dnl Check if the included version of Qt is at least Qt5.2
-dnl Output: fc_qt52=yes|no
-AC_DEFUN([FC_QT52_CHECK],
+dnl Check if the included version of Qt is at least Qt5.11
+dnl Output: fc_qt5_min_ver=yes|no
+AC_DEFUN([FC_QT5_VERSION_CHECK],
 [
   CPPFLAGS_SAVE="$CPPFLAGS"
   CPPFLAGS="$CPPFLAGS $FC_QT5_CPPFLAGS"
@@ -117,12 +115,12 @@ AC_DEFUN([FC_QT52_CHECK],
   LIBS="${LIBS}${LIBSADD}"
   AC_COMPILE_IFELSE([AC_LANG_PROGRAM(
     [[#include <QtCore>]],[[
-      #if QT_VERSION < 0x050200
+      #if QT_VERSION < 0x050b00
         fail
       #endif
     ]])],
-    [fc_qt52=yes],
-    [fc_qt52=no])
+    [fc_qt5_min_ver=yes],
+    [fc_qt5_min_ver=no])
   LIBS="$LIBS_SAVE"
   CPPFLAGS="${CPPFLAGS_SAVE}"
   CXXFLAGS="${CXXFLAGS_SAVE}"

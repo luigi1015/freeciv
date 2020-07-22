@@ -74,7 +74,7 @@ static bool is_unit_reachable_by_unit(const struct unit *defender,
                                       const struct unit *attacker)
 {
   struct unit_class *dclass = unit_class_get(defender);
-  struct unit_type *atype = unit_type_get(attacker);
+  const struct unit_type *atype = unit_type_get(attacker);
 
   return BV_ISSET(atype->targets, uclass_index(dclass));
 }
@@ -125,9 +125,9 @@ enum unit_attack_result unit_attack_unit_at_tile_result(const struct unit *punit
   /* 1. Can we attack _anything_ ? */
   if (!(utype_can_do_action(unit_type_get(punit), ACTION_ATTACK)
         || utype_can_do_action(unit_type_get(punit), ACTION_SUICIDE_ATTACK)
-        /* Needed because ACTION_NUKE uses this when evaluating its hard
-         * requirements. */
-        || utype_can_do_action(unit_type_get(punit), ACTION_NUKE))) {
+        /* Needed because ACTION_NUKE_UNITS uses this when evaluating its
+         * hard requirements. */
+        || utype_can_do_action(unit_type_get(punit), ACTION_NUKE_UNITS))) {
     return ATT_NON_ATTACK;
   }
 
@@ -533,13 +533,13 @@ May be called with a non-existing att_type to avoid any unit type
 effects.
 ***********************************************************************/
 static int defense_multiplication(const struct unit_type *att_type,
-                                  const struct unit_type *def_type,
+                                  const struct unit *def,
                                   const struct player *def_player,
                                   const struct tile *ptile,
-                                  int defensepower, bool fortified)
+                                  int defensepower)
 {
-  struct city *pcity = tile_city(ptile);
   int mod;
+  const struct unit_type *def_type = unit_type_get(def);
 
   fc_assert_ret_val(NULL != def_type, 0);
 
@@ -566,29 +566,32 @@ static int defense_multiplication(const struct unit_type *att_type,
   defensepower +=
     defensepower * tile_extras_defense_bonus(ptile, def_type) / 100;
 
-  if ((pcity || fortified)
-      && uclass_has_flag(utype_class(def_type), UCF_CAN_FORTIFY)
-      && !utype_has_flag(def_type, UTYF_CANT_FORTIFY)) {
-    defensepower = (defensepower * 3) / 2;
-  }
+  defensepower = defensepower
+    * (100
+       + get_target_bonus_effects(NULL, unit_owner(def), NULL,
+                                  tile_city(ptile), NULL, ptile, def,
+                                  unit_type_get(def), NULL, NULL, NULL,
+                                  EFT_FORTIFY_DEFENSE_BONUS)) / 100;
 
   return defensepower;
 }
 
 /*******************************************************************//**
- May be called with a non-existing att_type to avoid any effects which
- depend on the attacker.
+  May be called with a non-existing att_type to avoid any effects which
+  depend on the attacker.
 ***********************************************************************/
 int get_virtual_defense_power(const struct unit_type *att_type,
-			      const struct unit_type *def_type,
-			      const struct player *def_player,
-			      const struct tile *ptile,
-			      bool fortified, int veteran)
+                              const struct unit_type *def_type,
+                              struct player *def_player,
+                              struct tile *ptile,
+                              bool fortified, int veteran)
 {
   int defensepower = def_type->defense_strength;
   int db;
   const struct veteran_level *vlevel;
   struct unit_class *defclass;
+  struct unit *vdef;
+  int def;
 
   fc_assert_ret_val(def_type != NULL, 0);
 
@@ -602,6 +605,12 @@ int get_virtual_defense_power(const struct unit_type *att_type,
 
   defclass = utype_class(def_type);
 
+  vdef = unit_virtual_create(def_player, NULL, def_type, veteran);
+  unit_tile_set(vdef, ptile);
+  if (fortified) {
+    vdef->activity = ACTIVITY_FORTIFIED;
+  }
+
   db = POWER_FACTOR;
   if (uclass_has_flag(defclass, UCF_TERRAIN_DEFENSE)) {
     db += tile_terrain(ptile)->defense_bonus / (100 / POWER_FACTOR);
@@ -612,9 +621,12 @@ int get_virtual_defense_power(const struct unit_type *att_type,
     defensepower = defensepower * defclass->non_native_def_pct / 100;
   }
 
-  return defense_multiplication(att_type, def_type, def_player,
-                                ptile, defensepower,
-                                fortified);
+  def = defense_multiplication(att_type, vdef, def_player,
+                               ptile, defensepower);
+
+  unit_virtual_destroy(vdef);
+
+  return def;
 }
 
 /*******************************************************************//**
@@ -626,10 +638,9 @@ int get_total_defense_power(const struct unit *attacker,
 			    const struct unit *defender)
 {
   return defense_multiplication(unit_type_get(attacker),
-                                unit_type_get(defender),
+                                defender,
                                 unit_owner(defender), unit_tile(defender),
-                                get_defense_power(defender),
-                                defender->activity == ACTIVITY_FORTIFIED);
+                                get_defense_power(defender));
 }
 
 /*******************************************************************//**
@@ -638,18 +649,31 @@ int get_total_defense_power(const struct unit *attacker,
   bonuses.
 ***********************************************************************/
 int get_fortified_defense_power(const struct unit *attacker,
-                                const struct unit *defender)
+                                struct unit *defender)
 {
-  struct unit_type *att_type = NULL;
+  const struct unit_type *att_type = NULL;
+  enum unit_activity real_act;
+  int def;
+  const struct unit_type *utype;
 
   if (attacker != NULL) {
     att_type = unit_type_get(attacker);
   }
 
-  return defense_multiplication(att_type, unit_type_get(defender),
-                                unit_owner(defender), unit_tile(defender),
-                                get_defense_power(defender),
-                                TRUE);
+  real_act = defender->activity;
+
+  utype = unit_type_get(defender);
+  if (utype_can_do_action_result(utype, ACTRES_FORTIFY)) {
+    defender->activity = ACTIVITY_FORTIFIED;
+  }
+
+  def = defense_multiplication(att_type, defender,
+                               unit_owner(defender), unit_tile(defender),
+                               get_defense_power(defender));
+
+  defender->activity = real_act;
+
+  return def;
 }
 
 /*******************************************************************//**
@@ -766,6 +790,57 @@ struct unit *get_attacker(const struct unit *defender,
   } unit_list_iterate_end;
 
   return bestatt;
+}
+
+/**********************************************************************//**
+  Returns the defender of the tile in a diplomatic battle or NULL if no
+  diplomatic defender could be found.
+  @param act_unit the diplomatic attacker, trying to perform an action.
+  @param pvictim  unit that should be excluded as a defender.
+  @param tgt_tile the tile to defend.
+  @return the defender or NULL if no diplomatic defender could be found.
+**************************************************************************/
+struct unit *get_diplomatic_defender(const struct unit *act_unit,
+                                     const struct unit *pvictim,
+                                     const struct tile *tgt_tile)
+{
+  fc_assert_ret_val(act_unit, NULL);
+  fc_assert_ret_val(tgt_tile, NULL);
+
+  unit_list_iterate(tgt_tile->units, punit) {
+    if (unit_owner(punit) == unit_owner(act_unit)) {
+      /* I can't confirm if we won't deny that we weren't involved.
+       * (Won't defend against its owner.) */
+      continue;
+    }
+
+    if (punit == pvictim
+        && !unit_has_type_flag(punit, UTYF_SUPERSPY)) {
+      /* The victim unit is defenseless unless it's a SuperSpy.
+       * Rationalization: A regular diplomat don't mind being bribed. A
+       * SuperSpy is high enough up the chain that accepting a bribe is
+       * against his own interests. */
+      continue;
+    }
+
+    if (!(unit_has_type_flag(punit, UTYF_DIPLOMAT)
+          || unit_has_type_flag(punit, UTYF_SUPERSPY))) {
+      /* A UTYF_SUPERSPY unit may not actually be a spy, but a superboss
+       * which we cannot allow puny diplomats from getting the better
+       * of. UTYF_SUPERSPY vs UTYF_SUPERSPY in a diplomatic contest always
+       * kills the attacker. */
+
+      /* The unit can't defend in a diplomatic battle. */
+      continue;
+    }
+
+    /* The first potential defender found is chosen. No priority is given
+     * to the best defender. */
+    return punit;
+  } unit_list_iterate_end;
+
+  /* No diplomatic defender found. */
+  return NULL;
 }
 
 /*******************************************************************//**

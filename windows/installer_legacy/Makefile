@@ -5,7 +5,7 @@
 #
 # 1. download and extract the MinGW build environment from
 #    https://sourceforge.net/projects/freeciv/files/dependencies/gnuwin32/
-#    Current version is gnuwin32-2018-05-11.
+#    Current version is gnuwin32-2020-01-02.
 # 2. double click on "gnuwin32/msys.bat"
 # 3. install the development packages:
 #    $ hg qpush -a
@@ -58,7 +58,7 @@ build-freeciv-common:
 	# create build directory
 	mkdir -p build-$(GUI)
 	# configure
-	cd build-$(GUI); ../../../configure CPPFLAGS="-D_WIN32_WINNT=$(MIN_WIN_VER)" --enable-client=$(GUI) --with-followtag="windows-S3_1" --enable-fcdb=sqlite3 --enable-fcmp=$(FCMP) $(EXTRA_CONFIG)
+	cd build-$(GUI); ../../../configure CPPFLAGS="-D_WIN32_WINNT=$(MIN_WIN_VER)" --enable-client=$(GUI) --with-followtag="windows-S3_1" --enable-fcdb=sqlite3 --enable-fcmp=$(FCMP) --with-cacert-path="./ssl/certs/ca-bundle.crt" $(EXTRA_CONFIG)
 	# make
 	make -C build-$(GUI)
 	make -C build-$(GUI)/translations/core update-po
@@ -68,7 +68,7 @@ build-freeciv-ruledit:
 	# create build directory
 	mkdir -p build-ruledit
 	# configure
-	cd build-ruledit; ../../../configure CPPFLAGS="-D_WIN32_WINNT=$(MIN_WIN_VER)" --disable-client --disable-server --disable-fcmp --disable-freeciv-manual --enable-ruledit --enable-ai-static=stub $(EXTRA_CONFIG)
+	cd build-ruledit; ../../../configure CPPFLAGS="-D_WIN32_WINNT=$(MIN_WIN_VER)" --disable-client --disable-server --disable-fcmp --disable-freeciv-manual --enable-ruledit --enable-ai-static=stub --with-cacert-path="./ssl/certs/ca-bundle.crt" $(EXTRA_CONFIG)
 	# make
 	make -C build-ruledit
 	make -C build-ruledit/translations/ruledit update-po
@@ -191,6 +191,8 @@ COMMON_DLLS := \
 install-env-common:
 	# add DLLs
 	cp -R $(addprefix /bin/, $(COMMON_DLLS)) install-$(GUI)
+	mkdir -p install-$(GUI)/ssl/certs
+	cp /mingw32/ssl/certs/ca-bundle.crt install-$(GUI)/ssl/certs/
 
 DEFAULT_FCMP_DLLS := \
 	libgdk-3-0.dll \

@@ -25,7 +25,6 @@
 #include <QResizeEvent>
 #include <QScrollBar>
 #include <QSettings>
-#include <QSignalMapper>
 #include <QSocketNotifier>
 #include <QSpinBox>
 #include <QStackedLayout>
@@ -144,7 +143,7 @@ void fc_client::init()
   // General part not related to any single page
   menu_bar = new mr_menu();
   corner_wid = new fc_corner(this);
-  if (gui_options.gui_qt_show_titlebar == false) {
+  if (!gui_options.gui_qt_show_titlebar) {
     menu_bar->setCornerWidget(corner_wid);
   }
   setMenuBar(menu_bar);
@@ -154,7 +153,7 @@ void fc_client::init()
   status_bar->addWidget(status_bar_label, 1);
   set_status_bar(_("Welcome to Freeciv"));
   create_cursors();
-  switch_page_mapper = new QSignalMapper(this);
+
   // PAGE_MAIN
   pages[PAGE_MAIN] = new QWidget(central_wdg);
   page = PAGE_MAIN;
@@ -180,7 +179,7 @@ void fc_client::init()
   // PAGE_GAME
   gui_options.gui_qt_allied_chat_only = true;
   path = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation);
-  if (path.isEmpty() == false) {
+  if (!path.isEmpty()) {
     QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, path);
   }
   pages[PAGE_GAME] = new QWidget(central_wdg);
@@ -211,8 +210,6 @@ void fc_client::init()
   central_wdg->setLayout(central_layout);
   setCentralWidget(central_wdg);
 
-  connect(switch_page_mapper, SIGNAL(mapped( int)),
-                this, SLOT(switch_page(int)));
   resize(pages[PAGE_MAIN]->minimumSizeHint());
   setVisible(true);
 
@@ -356,7 +353,7 @@ void fc_client::switch_page(int new_pg)
     update_load_page();
     break;
   case PAGE_GAME:
-    if (gui_options.gui_qt_show_titlebar == false) {
+    if (!gui_options.gui_qt_show_titlebar) {
       setWindowFlags(Qt::Window | Qt::CustomizeWindowHint);
     }
     showMaximized();
@@ -607,7 +604,7 @@ void fc_client::read_settings()
 {
   QSettings s(QSettings::IniFormat, QSettings::UserScope,
               "freeciv-qt-client");
-  if (s.contains("Fonts-set") == false) {
+  if (!s.contains("Fonts-set")) {
     configure_fonts();
   }
   if (s.contains("Chat-fx-size")) {
@@ -814,7 +811,7 @@ void fc_client::popdown_unit_sel()
 void fc_client::remove_repo_dlg(QString str)
 {
   /* if app is closing opened_repo_dlg is already deleted */
-  if (is_closing() == false) {
+  if (!is_closing()) {
     opened_repo_dlgs.remove(str);
   }
 }
@@ -895,7 +892,7 @@ void fc_corner::close_fc()
 ****************************************************************************/
 void fc_corner::maximize()
 {
-  if (mw->isMaximized() == false) {
+  if (!mw->isMaximized()) {
     mw->showMaximized();
   } else {
     mw->showNormal();
@@ -961,20 +958,25 @@ QIcon fc_icons::get_icon(const QString &id)
 {
   QIcon icon;
   QString str;
+  QByteArray pn_bytes;
+  QByteArray png_bytes;
 
   str = QString("themes") + DIR_SEPARATOR + "gui-qt" + DIR_SEPARATOR;
   /* Try custom icon from theme */
+  pn_bytes = str.toLocal8Bit();
+  png_bytes = QString(pn_bytes.data() + current_theme + DIR_SEPARATOR
+                      + id + ".png").toLocal8Bit();
   icon.addFile(fileinfoname(get_data_dirs(),
-                            QString(str.toLocal8Bit().data() + current_theme
-                                    + DIR_SEPARATOR
-                                    + id + ".png").toLocal8Bit().data()));
+                            png_bytes.data()));
   str = str + "icons" + DIR_SEPARATOR;
   /* Try icon from icons dir */
   if (icon.isNull()) {
-  icon.addFile(fileinfoname(get_data_dirs(),
-                            QString(str.toLocal8Bit().data()
-                                    + id + ".png").toLocal8Bit().data()));
+    pn_bytes = str.toLocal8Bit();
+    png_bytes = QString(pn_bytes.data() + id + ".png").toLocal8Bit();
+    icon.addFile(fileinfoname(get_data_dirs(),
+                              png_bytes.data()));
   }
+
   return QIcon(icon);
 }
 
@@ -986,23 +988,25 @@ QPixmap* fc_icons::get_pixmap(const QString &id)
   QPixmap *pm;
   bool status;
   QString str;
+  QByteArray png_bytes;
 
   pm = new QPixmap;
   if (QPixmapCache::find(id, pm)) {
     return pm;
   }
   str = QString("themes") + DIR_SEPARATOR + "gui-qt" + DIR_SEPARATOR;
+  png_bytes = QString(str + current_theme + DIR_SEPARATOR
+                      + id + ".png").toLocal8Bit();
   status = pm->load(fileinfoname(get_data_dirs(),
-                                 QString(str + current_theme
-                                 + DIR_SEPARATOR
-                                 + id + ".png").toLocal8Bit().data()));
+                                 png_bytes.data()));
 
-  if (status == false) {
+  if (!status) {
     str = str + "icons" + DIR_SEPARATOR;
-    pm->load(fileinfoname(get_data_dirs(), QString(str
-                          + id + ".png").toLocal8Bit().data()));
+    png_bytes = QString(str + id + ".png").toLocal8Bit();
+    pm->load(fileinfoname(get_data_dirs(), png_bytes.data()));
   }
   QPixmapCache::insert(id, *pm);
+
   return pm;
 }
 
@@ -1012,11 +1016,14 @@ QPixmap* fc_icons::get_pixmap(const QString &id)
 QString fc_icons::get_path(const QString &id)
 {
   QString str;
-  
+  QByteArray png_bytes;
+
   str = QString("themes") + DIR_SEPARATOR + "gui-qt"
         + DIR_SEPARATOR + "icons" + DIR_SEPARATOR;
+  png_bytes = QString(str + id + ".png").toLocal8Bit();
+
   return fileinfoname(get_data_dirs(),
-                      QString(str + id + ".png").toLocal8Bit().data());
+                      png_bytes.data());
 }
 
 /************************************************************************//**
@@ -1200,7 +1207,9 @@ void pregame_options::update_buttons()
   // Update the "Select Nation" button
   if (pplayer != nullptr) {
     if (pplayer->nation != nullptr) {
-      nation->setText(nation_adjective_for_player(pplayer));
+      // Defeat keyboard shortcut mnemonics
+      nation->setText(QString(nation_adjective_for_player(pplayer))
+                      .replace("&", "&&"));
       psprite = get_nation_shield_sprite(tileset, pplayer->nation);
       pixmap = psprite->pm;
       nation->setIconSize(pixmap->size());
@@ -1261,7 +1270,10 @@ void pregame_options::ailevel_change(int i)
 void pregame_options::ruleset_change(int i)
 {
   if (!cruleset->currentText().isEmpty()) {
-    set_ruleset(cruleset->currentText().toLocal8Bit().data());
+    QByteArray rn_bytes;
+
+    rn_bytes = cruleset->currentText().toLocal8Bit();
+    set_ruleset(rn_bytes.data());
   }
 }
 

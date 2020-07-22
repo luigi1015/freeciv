@@ -16,7 +16,7 @@
 #endif
 
 
-//Qt
+// Qt
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QGridLayout>
@@ -25,7 +25,6 @@
 #include <QLineEdit>
 #include <QScrollArea>
 #include <QSettings>
-#include <QSignalMapper>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -114,8 +113,12 @@ fc_shortcut default_shortcuts[] = {
     _("Set Home City") },
   {SC_BUILDMINE, Qt::Key_M, Qt::AllButtons, Qt::NoModifier,
     _("Build Mine") },
+  {SC_PLANT, Qt::Key_M, Qt::AllButtons, Qt::ShiftModifier,
+    _("Plant") },
   {SC_BUILDIRRIGATION, Qt::Key_I, Qt::AllButtons, Qt::NoModifier,
     _("Build Irrigation") },
+  {SC_CULTIVATE, Qt::Key_I, Qt::AllButtons, Qt::ShiftModifier,
+    _("Cultivate") },
   {SC_BUILDROAD, Qt::Key_R, Qt::AllButtons, Qt::NoModifier,
     _("Build Road") },
   {SC_BUILDCITY, Qt::Key_B, Qt::AllButtons, Qt::NoModifier,
@@ -285,7 +288,7 @@ void fc_shortcuts::init_default(bool read)
   if (read) {
     suc = read_shortcuts();
   }
-  if (suc == false) {
+  if (!suc) {
     for (i = 0 ; i < num_shortcuts; i++) {
       s = new fc_shortcut();
       s->id = default_shortcuts[i].id;
@@ -374,7 +377,7 @@ void fc_shortcut_popup::closeEvent(QCloseEvent *ev)
   fc_sc_button *scp;
 
   if (sc != nullptr) {
-    if (check_if_exist() == false) {
+    if (!check_if_exist()) {
       scp = reinterpret_cast<fc_sc_button *>(parentWidget());
       scp->setText(shortcut_to_string(scp->sc));
       fc_shortcuts::sc()->set_shortcut(sc);
@@ -406,10 +409,10 @@ bool fc_shortcut_popup::check_if_exist()
       }
       id++;
     }
-    if (desc.isEmpty() == true) {
+    if (desc.isEmpty()) {
       desc = gui()->menu_bar->shortcut_exist(sc);
     }
-    if (desc.isEmpty() == false) {
+    if (!desc.isEmpty()) {
       fc_sc_button *fsb;
       fsb = qobject_cast<fc_sc_button*>(parentWidget());
       fsb->show_info(desc);
@@ -524,7 +527,7 @@ void fc_sc_button::show_info(QString str)
 **************************************************************************/
 void fc_sc_button::popup_error()
 {
-  hud_message_box scinfo(gui()->central_wdg);
+  hud_message_box *scinfo;
   QList<fc_shortcut_popup *> fsb_list;
   QString title;
 
@@ -538,10 +541,12 @@ void fc_sc_button::popup_error()
   /* TRANS: Given shortcut(%1) is already assigned */
   title = QString(_("%1 is already assigned to"))
                   .arg(shortcut_to_string(sc));
-  scinfo.setStandardButtons(QMessageBox::Ok);
-  scinfo.setDefaultButton(QMessageBox::Ok);
-  scinfo.set_text_title(err_message, title);
-  scinfo.exec();
+  scinfo = new hud_message_box(gui()->central_wdg);
+  scinfo->setStandardButtons(QMessageBox::Ok);
+  scinfo->setDefaultButton(QMessageBox::Ok);
+  scinfo->set_text_title(err_message, title);
+  scinfo->setAttribute(Qt::WA_DeleteOnClose);
+  scinfo->show();
 }
 
 /**********************************************************************//**
@@ -563,7 +568,7 @@ fc_shortcuts_dialog::~fc_shortcuts_dialog()
 }
 
 /**********************************************************************//**
-  Inits shortut dialog layout
+  Inits shortcut dialog layout
 **************************************************************************/
 void fc_shortcuts_dialog::init()
 {
@@ -590,37 +595,41 @@ void fc_shortcuts_dialog::init()
   scroll->setWidget(widget);
   main_layout->addWidget(scroll);
 
-  signal_map = new QSignalMapper;
   button_box = new QDialogButtonBox();
   but = new QPushButton(style()->standardIcon(QStyle::SP_DialogCancelButton),
                         _("Cancel"));
   button_box->addButton(but, QDialogButtonBox::ActionRole);
-  connect(but, SIGNAL(clicked()), signal_map, SLOT(map()));
-  signal_map->setMapping(but, RESPONSE_CANCEL);
+  QObject::connect(but, &QPushButton::clicked, [this]() {
+    apply_option(RESPONSE_CANCEL);
+  });
 
   but = new QPushButton(style()->standardIcon(QStyle::SP_DialogResetButton),
                         _("Reset"));
   button_box->addButton(but, QDialogButtonBox::ResetRole);
-  connect(but, SIGNAL(clicked()), signal_map, SLOT(map()));
-  signal_map->setMapping(but, RESPONSE_RESET);
+  QObject::connect(but, &QPushButton::clicked, [this]() {
+    apply_option(RESPONSE_RESET);
+  });
 
   but = new QPushButton(style()->standardIcon(QStyle::SP_DialogApplyButton),
                         _("Apply"));
   button_box->addButton(but, QDialogButtonBox::ActionRole);
-  connect(but, SIGNAL(clicked()), signal_map, SLOT(map()));
-  signal_map->setMapping(but, RESPONSE_APPLY);
+  QObject::connect(but, &QPushButton::clicked, [this]() {
+    apply_option(RESPONSE_APPLY);
+  });
 
   but = new QPushButton(style()->standardIcon(QStyle::SP_DialogSaveButton),
                         _("Save"));
   button_box->addButton(but, QDialogButtonBox::ActionRole);
-  connect(but, SIGNAL(clicked()), signal_map, SLOT(map()));
-  signal_map->setMapping(but, RESPONSE_SAVE);
+  QObject::connect(but, &QPushButton::clicked, [this]() {
+    apply_option(RESPONSE_SAVE);
+  });
 
   but = new QPushButton(style()->standardIcon(QStyle::SP_DialogOkButton),
                         _("Ok"));
   button_box->addButton(but, QDialogButtonBox::ActionRole);
-  connect(but, SIGNAL(clicked()), signal_map, SLOT(map()));
-  signal_map->setMapping(but, RESPONSE_OK);
+  QObject::connect(but, &QPushButton::clicked, [this]() {
+    apply_option(RESPONSE_OK);
+  });
 
   main_layout->addWidget(button_box);
   setLayout(main_layout);
@@ -628,7 +637,6 @@ void fc_shortcuts_dialog::init()
   size.setWidth(size.width() + 10
                 + style()->pixelMetric(QStyle::PM_ScrollBarExtent));
   resize(size);
-  connect(signal_map, SIGNAL(mapped(int)), this, SLOT(apply_option(int)));
   setAttribute(Qt::WA_DeleteOnClose);
 }
 

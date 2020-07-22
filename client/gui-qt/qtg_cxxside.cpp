@@ -36,7 +36,6 @@ void setup_gui_funcs()
 
   funcs->get_gui_type = qtg_get_gui_type;
   funcs->insert_client_build_info = qtg_insert_client_build_info;
-  funcs->adjust_default_options = qtg_adjust_default_options;
 
   funcs->version_message = qtg_version_message;
   funcs->real_output_window_append = qtg_real_output_window_append;
@@ -95,6 +94,7 @@ void setup_gui_funcs()
 
   funcs->popup_combat_info = qtg_popup_combat_info;
   funcs->update_timeout_label = qtg_update_timeout_label;
+  funcs->start_turn = qtg_start_turn;
   funcs->real_city_dialog_popup = qtg_real_city_dialog_popup;
   funcs->real_city_dialog_refresh = qtg_real_city_dialog_refresh;
   funcs->popdown_city_dialog = qtg_popdown_city_dialog;

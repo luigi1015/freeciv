@@ -102,14 +102,6 @@ void insert_client_build_info(char *outbuf, size_t outlen)
 }
 
 /**********************************************************************//**
-  Call adjust_default_options callback
-**************************************************************************/
-void adjust_default_options(void)
-{
-  funcs.adjust_default_options();
-}
-
-/**********************************************************************//**
   Call is_view_supported callback
 **************************************************************************/
 bool is_view_supported(enum ts_type type)
@@ -381,7 +373,7 @@ void real_conn_list_dialog_update(void *unused)
 /**********************************************************************//**
   Call close_connection_dialog callback
 **************************************************************************/
-void close_connection_dialog()
+void close_connection_dialog(void)
 {
   funcs.close_connection_dialog();
 }
@@ -519,6 +511,14 @@ void update_timeout_label(void)
 }
 
 /**********************************************************************//**
+  Call start_turn callback
+**************************************************************************/
+void start_turn(void)
+{
+  funcs.start_turn();
+}
+
+/**********************************************************************//**
   Call real_city_dialog_popup callback
 **************************************************************************/
 void real_city_dialog_popup(struct city *pcity)
@@ -545,7 +545,7 @@ void popdown_city_dialog(struct city *pcity)
 /**********************************************************************//**
   Call popdown_all_city_dialogs callback
 **************************************************************************/
-void popdown_all_city_dialogs()
+void popdown_all_city_dialogs(void)
 {
   funcs.popdown_all_city_dialogs();
 }
@@ -553,7 +553,7 @@ void popdown_all_city_dialogs()
 /**********************************************************************//**
   Call handmade_scenario_warning callback
 **************************************************************************/
-bool handmade_scenario_warning()
+bool handmade_scenario_warning(void)
 {
   return funcs.handmade_scenario_warning();
 }

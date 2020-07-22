@@ -389,9 +389,8 @@ int client_main(int argc, char *argv[])
       cmdhelp_add(help, "d",
                   /* TRANS: "debug" is exactly what user must type, do not translate. */
                   _("debug LEVEL"),
-                  _("Set debug log level (%d to %d, or "
-                    "%d:file1,min,max:...)"), LOG_FATAL, LOG_DEBUG,
-                  LOG_DEBUG);
+                  _("Set debug log level (one of f,e,w,n,v,d, or "
+                    "d:file1,min,max:...)"));
 #else  /* FREECIV_DEBUG */
       cmdhelp_add(help, "d",
                   /* TRANS: "debug" is exactly what user must type, do not translate. */
@@ -1047,7 +1046,7 @@ void client_remove_all_cli_conn(void)
 /**********************************************************************//**
   Send attribute block.
 **************************************************************************/
-void send_attribute_block_request()
+void send_attribute_block_request(void)
 {
   send_packet_player_attribute_block(&client.conn);
 }
@@ -1455,6 +1454,36 @@ static bool client_ss_val_bool_get(server_setting_id id)
 }
 
 /**********************************************************************//**
+  Returns the value of the integer server setting with the specified id.
+**************************************************************************/
+static int client_ss_val_int_get(server_setting_id id)
+{
+  struct option *pset = optset_option_by_number(server_optset, id);
+
+  if (pset) {
+    return option_int_get(pset);
+  } else {
+    log_error("No server setting with the id %d exists.", id);
+    return 0;
+  }
+}
+
+/**********************************************************************//**
+  Returns the value of the bitwise server setting with the specified id.
+**************************************************************************/
+static unsigned int client_ss_val_bitwise_get(server_setting_id id)
+{
+  struct option *pset = optset_option_by_number(server_optset, id);
+
+  if (pset) {
+    return option_bitwise_get(pset);
+  } else {
+    log_error("No server setting with the id %d exists.", id);
+    return FALSE;
+  }
+}
+
+/**********************************************************************//**
   Initialize client specific functions.
 **************************************************************************/
 static void fc_interface_init_client(void)
@@ -1465,6 +1494,8 @@ static void fc_interface_init_client(void)
   funcs->server_setting_name_get = client_ss_name_get;
   funcs->server_setting_type_get = client_ss_type_get;
   funcs->server_setting_val_bool_get = client_ss_val_bool_get;
+  funcs->server_setting_val_int_get = client_ss_val_int_get;
+  funcs->server_setting_val_bitwise_get = client_ss_val_bitwise_get;
   funcs->create_extra = NULL;
   funcs->destroy_extra = NULL;
   funcs->player_tile_vision_get = client_map_is_known_and_seen;

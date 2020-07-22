@@ -16,7 +16,7 @@ options="+Freeciv-ruleset-Devel-2017.Jan.02 web-compatible"
 format_version=20
 
 [control]
-; Names for custom terrain flags. There can be up to 8 of these.
+; Names for custom terrain flags. There can be up to 10 of these.
 ; name          = rule name; In some circumstances user may see this
 ;                 as part of some sentences, so try to make it descriptive
 ;                 and sensible.
@@ -26,6 +26,7 @@ flags =
     _("Oil"), _("Mine can be upgraded to Oil Well.")
     _("Sea"), _("Allows cities to build Harbors and coastal wonders.")
     _("NoPollution"), _("No Pollution nor Fallout appear here.")
+    _("NoFortify"), _("No units can fortify on this terrain.")
   }
 
 ; Names for custom extra flags. There can be up to 8 of these.
@@ -146,6 +147,10 @@ ocean_resources = FALSE
 ;                        terrain rule_name -- transformation changes to that
 ;                          terrain
 ; transform_time       = time to transform; if 0, cannot transform
+; placing_time         = time for 'placing' an extra; if 0, cannot place
+;                        Nonzero values only affect extras with build_time 0.
+;                        Such extras can modify time with build_time_factor.
+;                        Default is 1.
 ; pillage_time         = time to pillage extra from the tile (0 = impossible)
 ;                        Nonzero values only affect extras with removal_time 0.
 ; clean_pollution_time = time for 'clean pollution' activity (0 = impossible)
@@ -184,7 +189,6 @@ ocean_resources = FALSE
 ;                        (lua scripting)
 ;   - NoZoc            = Units on this terrain are not generating or subject
 ;                        to zoc
-;   - NoFortify        = Units cannot fortify on this terrain
 ;   - Frozen           = Frozen/polar terrain. For water tiles, Frozen terrain
 ;                        is generated near poles. Conversion between frozen
 ;                        and unfrozen terrain can be controlled with
@@ -472,6 +476,10 @@ color.b              = 106
 helptext             = _("\
 Deserts are regions of extreme dryness, making agriculture and\
  trade very difficult.\
+"), _("\
+Deserts can be irrigated for a small amount of extra food, but without\
+ an oasis or river, bare desert cannot be further improved with\
+ farmland.\
 "), _("\
 Rivers bring fertile soil to deserts; on a desert river not already\
  benefiting from an oasis, building irrigation will yield two extra food\
@@ -1047,7 +1055,7 @@ ui_name_base_airbase = _("?gui_type:Build Airstrip/Airbase")
 ;                           "CleanPollution", "CleanFallout", "Pillage",
 ;                           "Disappear", or "Enter"
 ; infracost               = Number of infrapoints it costs to place this
-;                           extra. 0 means extra cannot be placed. Default is 1
+;                           extra. 0, the default, means extra cannot be placed.
 ; graphic                 = tag specifying preferred graphic
 ; graphic_alt             = tag for alternate graphic if preferred graphic is
 ;                           not present. Can use eg "-" for no alternate
@@ -1385,7 +1393,9 @@ conflicts      = "Mine", "Oil Well"
 helptext       = _("\
 Once Refrigeration is known, irrigation systems can be upgraded to \
 farmland by irrigating them a second time; if the city working the tile \
-has a Supermarket, a farmland tile provides 50% more food.\
+has a Supermarket, a farmland tile provides 50% more food. (Hence, \
+farmland is only useful on tiles which with irrigation yield 2 or more \
+food.)\
 "), _("\
 Farmland on a tile prevents any trade bonus from Super Highways.\
 "), _("\

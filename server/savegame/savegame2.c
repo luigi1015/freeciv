@@ -298,7 +298,7 @@ static void sg_roads_set(bv_extras *extras, char ch, struct road_type **idx);
 static struct extra_type *char2resource(char c);
 static struct terrain *char2terrain(char ch);
 static Tech_type_id technology_load(struct section_file *file,
-                                    const char* path, int plrno);
+                                    const char *path, int plrno);
 
 static void sg_load_ruleset(struct loaddata *loading);
 static void sg_load_savefile(struct loaddata *loading);
@@ -403,7 +403,7 @@ void savegame2_load(struct section_file *file)
   sg_load_random(loading);
   /* [settings] */
   sg_load_settings(loading);
-  /* [ruldata] */
+  /* [ruledata] */
   sg_load_ruledata(loading);
   /* [players] (basic data) */
   sg_load_players_basic(loading);
@@ -423,6 +423,8 @@ void savegame2_load(struct section_file *file)
   sg_load_mapimg(loading);
   /* [script] -- must come last as may reference game objects */
   sg_load_script(loading);
+  /* [post_load_compat]; needs the game loaded by [savefile] */
+  sg_load_post_load_compat(loading, SAVEGAME_2);
 
   /* Sanity checks for the loaded game. */
   sg_load_sanitycheck(loading);
@@ -434,7 +436,10 @@ void savegame2_load(struct section_file *file)
 
   if (!sg_success) {
     log_error("Failure loading savegame!");
-    game_reset();
+    /* Try to get the server back to a vaguely sane state */
+    server_game_free();
+    server_game_init(FALSE);
+    load_rulesets(NULL, NULL, FALSE, NULL, TRUE, FALSE, TRUE);
   }
 }
 
@@ -1041,10 +1046,10 @@ static struct terrain *char2terrain(char ch)
   is too old) load from path.
 ****************************************************************************/
 static Tech_type_id technology_load(struct section_file *file,
-                                    const char* path, int plrno)
+                                    const char *path, int plrno)
 {
   char path_with_name[128];
-  const char* name;
+  const char *name;
   struct advance *padvance;
 
   fc_snprintf(path_with_name, sizeof(path_with_name),
@@ -1082,10 +1087,12 @@ static Tech_type_id technology_load(struct section_file *file,
 ****************************************************************************/
 static void sg_load_ruleset(struct loaddata *loading)
 {
+  const char *ruleset = secfile_lookup_str_default(loading->file,
+                                                   GAME_DEFAULT_RULESETDIR,
+                                                   "savefile.rulesetdir");
+
   /* Load ruleset. */
-  sz_strlcpy(game.server.rulesetdir,
-             secfile_lookup_str_default(loading->file, GAME_DEFAULT_RULESETDIR,
-                                        "savefile.rulesetdir"));
+  sz_strlcpy(game.server.rulesetdir, ruleset);
   if (!strcmp("default", game.server.rulesetdir)) {
     int version;
 
@@ -1099,10 +1106,13 @@ static void sg_load_ruleset(struct loaddata *loading)
       /* 'default' is the old name of the classic ruleset */
       sz_strlcpy(game.server.rulesetdir, "classic");
     }
+    log_verbose("Savegame specified ruleset '%s'. Really loading '%s'.",
+                ruleset, game.server.rulesetdir);
   }
   if (!load_rulesets(NULL, NULL, FALSE, NULL, TRUE, FALSE, TRUE)) {
     /* Failed to load correct ruleset */
-    sg_failure_ret(FALSE, _("Failed to load ruleset"));
+    sg_failure_ret(FALSE, _("Failed to load ruleset '%s' needed for savegame."),
+                   ruleset);
   }
 }
 
@@ -1460,6 +1470,9 @@ static void sg_load_ruledata(struct loaddata *loading)
 {
   int i;
   const char *name;
+
+  /* Check status and return if not OK (sg_success != TRUE). */
+  sg_check_ret();
 
   for (i = 0;
        (name = secfile_lookup_str_default(loading->file, NULL,
@@ -3737,6 +3750,7 @@ static bool sg_load_player_unit(struct loaddata *loading,
   const char *facing_str;
   enum tile_special_type cfspe;
   int natnbr;
+  bool ai_controlled;
 
   sg_warn_ret_val(secfile_lookup_int(loading->file, &punit->id, "%s.id",
                                      unitstr), FALSE, "%s", secfile_error());
@@ -3822,7 +3836,7 @@ static bool sg_load_player_unit(struct loaddata *loading,
       if (tgt != NULL) {
         set_unit_activity_targeted(punit, ACTIVITY_IRRIGATE, tgt);
       } else {
-        set_unit_activity_targeted(punit, ACTIVITY_IRRIGATE, NULL);
+        set_unit_activity(punit, ACTIVITY_CULTIVATE);
       }
     } else if (activity == ACTIVITY_MINE) {
       struct extra_type *tgt = next_extra_for_tile(unit_tile(punit),
@@ -3832,7 +3846,7 @@ static bool sg_load_player_unit(struct loaddata *loading,
       if (tgt != NULL) {
         set_unit_activity_targeted(punit, ACTIVITY_MINE, tgt);
       } else {
-        set_unit_activity_targeted(punit, ACTIVITY_MINE, NULL);
+        set_unit_activity(punit, ACTIVITY_PLANT);
       }
     } else {
       set_unit_activity(punit, activity);
@@ -4114,9 +4128,16 @@ static bool sg_load_player_unit(struct loaddata *loading,
   CALL_FUNC_EACH_AI(unit_load, loading->file, punit, unitstr);
 
   sg_warn_ret_val(secfile_lookup_bool(loading->file,
-                                      &punit->ai_controlled,
+                                      &ai_controlled,
                                       "%s.ai", unitstr), FALSE,
                   "%s", secfile_error());
+  if (ai_controlled) {
+    /* Autosettler and Auotexplore are separated by
+     * compat_post_load_030100() when set to SSA_AUTOSETTLER */
+    punit->ssa_controller = SSA_AUTOSETTLER;
+  } else {
+    punit->ssa_controller = SSA_NONE;
+  }
   sg_warn_ret_val(secfile_lookup_int(loading->file, &punit->hp,
                                      "%s.hp", unitstr), FALSE,
                   "%s", secfile_error());
@@ -4226,7 +4247,9 @@ static bool sg_load_player_unit(struct loaddata *loading,
         order->order = char2order(orders_unitstr[j]);
         order->dir = char2dir(dir_unitstr[j]);
         order->activity = char2activity(act_unitstr[j]);
-        order->sub_target = -1;
+        /* Target, if needed, is set in compat_post_load_030100() */
+        order->target = NO_TARGET;
+        order->sub_target = NO_TARGET;
 
         if (order->order == ORDER_LAST
             || (order->order == ORDER_MOVE && !direction8_is_valid(order->dir))
@@ -4662,6 +4685,11 @@ static void sg_load_player_vision(struct loaddata *loading,
       if (NULL != pcity) {
         update_dumb_city(plr, pcity);
       }
+    } else if (!game.server.foggedborders && map_is_known(ptile, plr)) {
+      /* Non fogged borders aren't loaded. See hrm Bug #879084 */
+      struct player_tile *plrtile = map_get_player_tile(ptile, plr);
+
+      plrtile->owner = tile_owner(ptile);
     }
   } whole_map_iterate_end;
 }
@@ -4882,6 +4910,9 @@ static void sg_load_treaties(struct loaddata *loading)
   const char *plr0;
   struct treaty_list *treaties = get_all_treaties();
 
+  /* Check status and return if not OK (sg_success != TRUE). */
+  sg_check_ret();
+
   for (tidx = 0; (plr0 = secfile_lookup_str_default(loading->file, NULL,
                                                     "treaty%d.plr0", tidx)) != NULL ;
        tidx++) {
@@ -4960,6 +4991,9 @@ static void sg_load_history(struct loaddata *loading)
 {
   struct history_report *hist = history_report_get();
   int turn;
+
+  /* Check status and return if not OK (sg_success != TRUE). */
+  sg_check_ret();
 
   turn = secfile_lookup_int_default(loading->file, -2, "history.turn");
 
@@ -5069,14 +5103,6 @@ static void sg_load_sanitycheck(struct loaddata *loading)
     players_iterate(aplayer) {
       resolve_unit_stacks(pplayer, aplayer, TRUE);
     } players_iterate_end;
-
-    /* Backward compatibility: if we had any open-ended orders (pillage)
-     * in the savegame, assign specific targets now */
-    unit_list_iterate(pplayer->units, punit) {
-      unit_assign_specific_activity_target(punit,
-                                           &punit->activity,
-                                           &punit->activity_target);
-    } unit_list_iterate_end;
   } players_iterate_end;
 
   /* Recalculate the potential buildings for each city. Has caused some
@@ -5135,6 +5161,16 @@ static void sg_load_sanitycheck(struct loaddata *loading)
       presearch->tech_goal = A_UNSET;
     }
   } researches_iterate_end;
+
+  players_iterate(pplayer) {
+    unit_list_iterate_safe(pplayer->units, punit) {
+      if (!unit_order_list_is_sane(punit->orders.length,
+                                   punit->orders.list)) {
+        log_sg("Invalid unit orders for unit %d.", punit->id);
+        free_unit_orders(punit);
+      }
+    } unit_list_iterate_safe_end;
+  } players_iterate_end;
 
   if (0 == strlen(server.game_identifier)
       || !is_base64url(server.game_identifier)) {

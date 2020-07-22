@@ -12,7 +12,7 @@ priority = 5
 ;version = ""
 
 ; Summary and full description of the tileset.
-summary = _("Small hex tiles")
+summary = _("Small hex tileset.")
 ;description = ""
 
 ; TODO: add more overall information fields on tiles, 
@@ -125,7 +125,8 @@ tilelabel_offset_y = 28
 ;  "FocusUnit",  ; The focused unit(s).
 ;  "Goto",       ; Goto turn count and intermediate points, *not* goto lines.
 ;  "WorkerTask", ; The unit task indicators ("G", "S", ...).
-;  "Editor"      ; Editor stuff (selected tile and start points).
+;  "Editor",     ; Editor stuff (selected tile and start points).
+;  "InfraWork"   ; Icons for the extras being placed.
 
 ; This is special because it gets freed and reloaded as required:
 main_intro_file    = "misc/intro"

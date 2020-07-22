@@ -28,7 +28,8 @@ enum cursor_hover_state {
   HOVER_PARADROP,
   HOVER_CONNECT,
   HOVER_PATROL,
-  HOVER_ACT_SEL_TGT
+  HOVER_ACT_SEL_TGT,
+  HOVER_GOTO_SEL_TGT,
 };
 
 /* Selecting unit from a stack without popup. */
@@ -47,6 +48,7 @@ extern enum cursor_hover_state hover_state;
 extern enum unit_activity connect_activity;
 extern struct extra_type *connect_tgt;
 extern action_id goto_last_action;
+extern int goto_last_tgt;
 extern int goto_last_sub_tgt;
 extern enum unit_orders goto_last_order;
 extern bool non_ai_unit_focus;
@@ -71,6 +73,7 @@ void control_mouse_cursor(struct tile *ptile);
 void set_hover_state(struct unit_list *punits, enum cursor_hover_state state,
                      enum unit_activity connect_activity,
                      struct extra_type *tgt,
+                     int last_tgt,
                      int goto_last_sub_tgt,
                      action_id goto_last_action,
                      enum unit_orders goto_last_order);
@@ -86,6 +89,8 @@ void request_new_unit_activity_targeted(struct unit *punit,
 void request_unit_load(struct unit *pcargo, struct unit *ptransporter,
                        struct tile *ptile);
 void request_unit_unload(struct unit *pcargo);
+void request_unit_ssa_set(const struct unit *punit,
+                          enum server_side_agent agent);
 void request_unit_autosettlers(const struct unit *punit);
 void request_unit_build_city(struct unit *punit);
 void request_unit_caravan_action(struct unit *punit, action_id action);
@@ -240,7 +245,9 @@ void key_unit_fortress(void);
 void key_unit_goto(void);
 void key_unit_homecity(void);
 void key_unit_irrigate(void);
+void key_unit_cultivate(void);
 void key_unit_mine(void);
+void key_unit_plant(void);
 void key_unit_patrol(void);
 void key_unit_paradrop(void);
 void key_unit_pillage(void);

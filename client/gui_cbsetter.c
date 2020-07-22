@@ -38,7 +38,7 @@
 /**********************************************************************//**
   Setup the gui callback table.
 **************************************************************************/
-void setup_gui_funcs()
+void setup_gui_funcs(void)
 {
   struct gui_funcs *funcs = get_gui_funcs();
 
@@ -48,7 +48,6 @@ void setup_gui_funcs()
 
   funcs->get_gui_type = gui_get_gui_type;
   funcs->insert_client_build_info = gui_insert_client_build_info;
-  funcs->adjust_default_options = gui_adjust_default_options;
 
   funcs->version_message = gui_version_message;
   funcs->real_output_window_append = gui_real_output_window_append;
@@ -106,6 +105,7 @@ void setup_gui_funcs()
 
   funcs->popup_combat_info = gui_popup_combat_info;
   funcs->update_timeout_label = gui_update_timeout_label;
+  funcs->start_turn = gui_start_turn;
   funcs->real_city_dialog_popup = gui_real_city_dialog_popup;
   funcs->real_city_dialog_refresh = gui_real_city_dialog_refresh;
   funcs->popdown_city_dialog = gui_popdown_city_dialog;

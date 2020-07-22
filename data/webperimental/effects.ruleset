@@ -128,6 +128,25 @@ reqs    =
       "UnitClass", "Land", "Local"
     }
 
+[effect_fortified]
+type    = "Fortify_Defense_Bonus"
+value   = 50
+reqs    =
+    { "type", "name", "range"
+      "Activity", "Fortified", "Local"
+    }
+
+[effect_city_fortified]
+type    = "Fortify_Defense_Bonus"
+value   = 50
+reqs    =
+    { "type",          "name",         "range", "present"
+      "CityTile",      "Center",       "Local", TRUE
+      "Activity",      "Fortified",    "Local", FALSE
+      "UnitClassFlag", "CanFortify",   "Local", TRUE
+      "UnitFlag",      "Cant_Fortify", "Local", FALSE
+    }
+
 ; Base vision range - radius of vision is sqrt(5) = 2.24
 [effect_city_vision]
 type    = "City_Vision_Radius_Sq"
@@ -2457,6 +2476,14 @@ reqs	=
       "DiplRel", "War", "Local", FALSE
     }
 
+[effect_steal_maps_pct]
+type	= "Maps_Stolen_Pct"
+value	= -50
+reqs	=
+    { "type", "name", "range", "present"
+      "Action", "Steal Maps Escape", "Local", TRUE
+    }
+
 [effect_illegal_action_move_cost_base]
 type	= "Illegal_Action_Move_Cost"
 value	= 1
@@ -2464,6 +2491,10 @@ reqs	=
     { "type", "name", "range", "present"
       "Action", "Found City", "Local", FALSE
       "Action", "Join City", "Local", FALSE
+      "Action", "Transport Board", "Local", FALSE
+      "Action", "Transport Alight", "Local", FALSE
+      "Action", "Transport Disembark", "Local", FALSE
+      "Action", "Transport Disembark 2", "Local", FALSE
     }
 
 [effect_incident_caught_steal_tech]
@@ -2529,9 +2560,9 @@ reqs	=
       "DiplRel", "War", "Local", FALSE
     }
 
-[effect_incident_success_sabotage_unit]
+[effect_incident_success_sabotage_unit_terrorist_state]
 type	= "Casus_Belli_Success"
-value	= 1
+value	= 1000
 reqs	=
     { "type", "name", "range", "present"
       "Action", "Sabotage Unit Escape", "Local", TRUE
@@ -2556,36 +2587,36 @@ reqs	=
       "DiplRel", "War", "Local", FALSE
     }
 
-[effect_incident_success_poison]
+[effect_incident_success_poison_terrorist_state]
 type	= "Casus_Belli_Success"
-value	= 1
+value	= 1000
 reqs	=
     { "type", "name", "range", "present"
       "Action", "Poison City Escape", "Local", TRUE
       "DiplRel", "War", "Local", FALSE
     }
 
-[effect_incident_success_sabotage_city]
+[effect_incident_success_sabotage_city_terrorist_state]
 type	= "Casus_Belli_Success"
-value	= 1
+value	= 1000
 reqs	=
     { "type", "name", "range", "present"
       "Action", "Sabotage City", "Local", TRUE
       "DiplRel", "War", "Local", FALSE
     }
 
-[effect_incident_success_sabotage_city_esc]
+[effect_incident_success_sabotage_city_esc_terrorist_state]
 type	= "Casus_Belli_Success"
-value	= 1
+value	= 1000
 reqs	=
     { "type", "name", "range", "present"
       "Action", "Sabotage City Escape", "Local", TRUE
       "DiplRel", "War", "Local", FALSE
     }
 
-[effect_incident_success_tgt_sabotage_city]
+[effect_incident_success_tgt_sabotage_city_terrorist_state]
 type	= "Casus_Belli_Success"
-value	= 1
+value	= 1000
 reqs	=
     { "type", "name", "range", "present"
       "Action", "Targeted Sabotage City Escape", "Local", TRUE
@@ -2600,6 +2631,23 @@ reqs	=
       "Action", "Targeted Sabotage City Escape", "Local", TRUE
     }
 
+[effect_incident_success_sabotage_city_production]
+type	= "Casus_Belli_Success"
+value	= 1
+reqs	=
+    { "type", "name", "range", "present"
+      "Action", "Sabotage City Production Escape", "Local", TRUE
+      "DiplRel", "War", "Local", FALSE
+    }
+
+[effect_sabotage_city_production_city_half_chance]
+type	= "Action_Odds_Pct"
+value	= -50
+reqs	=
+    { "type", "name", "range", "present"
+      "Action", "Sabotage City Production Escape", "Local", TRUE
+    }
+
 [effect_incident_success_explode_nuke]
 type	= "Casus_Belli_Success"
 value	= 1
@@ -2608,12 +2656,38 @@ reqs	=
       "Action", "Explode Nuclear", "Local", TRUE
     }
 
+[effect_incident_success_explode_nuke_city]
+type	= "Casus_Belli_Success"
+value	= 1
+reqs	=
+    { "type", "name", "range", "present"
+      "Action", "Nuke City", "Local", TRUE
+    }
+
+[effect_incident_success_explode_nuke_units]
+type	= "Casus_Belli_Success"
+value	= 1
+reqs	=
+    { "type", "name", "range", "present"
+      "Action", "Nuke Units", "Local", TRUE
+    }
+
 [effect_incident_success_suitcase_nuke]
 type	= "Casus_Belli_Success"
 value	= 1
 reqs	=
     { "type", "name", "range", "present"
       "Action", "Suitcase Nuke", "Local", TRUE
+      "DiplRel", "War", "Local", TRUE
+    }
+
+[effect_incident_success_suitcase_nuke_terrorist_state]
+type	= "Casus_Belli_Success"
+value	= 1000
+reqs	=
+    { "type", "name", "range", "present"
+      "Action", "Suitcase Nuke", "Local", TRUE
+      "DiplRel", "War", "Local", FALSE
     }
 
 [effect_incident_success_suitcase_nuke_veteran]
@@ -2622,6 +2696,16 @@ value	= 1
 reqs	=
     { "type", "name", "range", "present"
       "Action", "Suitcase Nuke Escape", "Local", TRUE
+      "DiplRel", "War", "Local", TRUE
+    }
+
+[effect_incident_success_suitcase_nuke_veteran_terrorist_state]
+type	= "Casus_Belli_Success"
+value	= 1000
+reqs	=
+    { "type", "name", "range", "present"
+      "Action", "Suitcase Nuke Escape", "Local", TRUE
+      "DiplRel", "War", "Local", FALSE
     }
 
 ; Double (+100%) buy cost for Great Wonders
@@ -2631,4 +2715,108 @@ value   = 100
 reqs    =
     { "type", "name", "range"
       "BuildingGenus", "GreatWonder", "Local"
+    }
+
+[effect_action_success_move_cost_embassy]
+type    = "Action_Success_Actor_Move_Cost"
+value   = 1
+reqs    =
+    { "type", "name", "range", "present"
+      "Action", "Establish Embassy", "Local", TRUE
+    }
+
+[effect_action_success_move_cost_investigate]
+type    = "Action_Success_Actor_Move_Cost"
+value   = 1
+reqs    =
+    { "type", "name", "range", "present"
+      "Action", "Investigate City", "Local", TRUE
+    }
+
+[effect_action_success_move_cost_expel]
+type    = "Action_Success_Actor_Move_Cost"
+value   = 3
+reqs    =
+    { "type", "name", "range", "present"
+      "Action", "Expel Unit", "Local", TRUE
+    }
+
+[effect_action_success_move_cost_expelled]
+type    = "Action_Success_Target_Move_Cost"
+value   = 65535
+reqs    =
+    { "type", "name", "range", "present"
+      "Action", "Expel Unit", "Local", TRUE
+    }
+
+[effect_action_success_move_cost_disrupt]
+type    = "Action_Success_Actor_Move_Cost"
+value   = 1
+reqs    =
+    { "type", "name", "range", "present"
+      "Action", "User Action 1", "Local", TRUE
+    }
+
+[effect_action_success_move_cost_disrupted]
+type    = "Action_Success_Target_Move_Cost"
+value   = 3
+reqs    =
+    { "type", "name", "range", "present"
+      "Action", "User Action 1", "Local", TRUE
+    }
+
+[effect_action_success_move_cost_bombard]
+type    = "Action_Success_Actor_Move_Cost"
+value   = 65535
+reqs    =
+    { "type", "name", "range", "present"
+      "Action", "Bombard", "Local", TRUE
+    }
+
+[effect_action_success_move_cost_heal_unit]
+type    = "Action_Success_Actor_Move_Cost"
+value   = 3
+reqs    =
+    { "type", "name", "range", "present"
+      "Action", "Heal Unit", "Local", TRUE
+    }
+
+[effect_action_success_move_cost_healed]
+type    = "Action_Success_Target_Move_Cost"
+value   = 3
+reqs    =
+    { "type", "name", "range", "present"
+      "Action", "Heal Unit", "Local", TRUE
+    }
+
+[effect_action_success_move_cost_royal_sapper]
+type    = "Action_Success_Actor_Move_Cost"
+value   = 65535
+reqs    =
+    { "type", "name", "range", "present"
+      "Action", "Surgical Strike Building", "Local", TRUE
+    }
+
+[effect_strike_half_chance]
+type	= "Action_Odds_Pct"
+value	= -50
+reqs	=
+    { "type", "name", "range", "present"
+      "Action", "Surgical Strike Building", "Local", TRUE
+    }
+
+[effect_unit_shield_value_recycle]
+type    = "Unit_Shield_Value_Pct"
+value   = -50
+reqs    =
+    { "type",   "name",         "range", "present"
+      "Action", "Recycle Unit", "Local", TRUE
+    }
+
+[effect_unit_shield_value_in_upgrade_price_calc]
+type    = "Unit_Shield_Value_Pct"
+value   = -50
+reqs    =
+    { "type",   "name",         "range", "present"
+      "Action", "Upgrade Unit", "Local", TRUE
     }

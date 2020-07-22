@@ -17,7 +17,7 @@ options="+Freeciv-ruleset-Devel-2017.Jan.02"
 format_version=20
 
 [control]
-; Names for custom terrain flags. There can be up to 8 of these.
+; Names for custom terrain flags. There can be up to 10 of these.
 ; name          = rule name; In some circumstances user may see this
 ;                 as part of some sentences, so try to make it descriptive
 ;                 and sensible.
@@ -26,6 +26,7 @@ flags =
   { "name", "helptxt"
     _("Radiating"), _("Terrain has alien radiation.")
     _("NoPollution"), _("No Pollution nor Fallout appear here.")
+    _("NoFortify"), _("No units can fortify on this terrain.")
   }
 
 ; Names for custom extra flags. There can be up to 8 of these.
@@ -140,6 +141,10 @@ ocean_resources = TRUE
 ;                        terrain rule_name -- transformation changes to that
 ;                          terrain
 ; transform_time       = time to transform; if 0, cannot transform
+; placing_time         = time for 'placing' an extra; if 0, cannot place
+;                        Nonzero values only affect extras with build_time 0.
+;                        Such extras can modify time with build_time_factor.
+;                        Default is 1.
 ; pillage_time         = time to pillage extra from the tile (0 = impossible)
 ;                        Nonzero values only affect extras with removal_time 0.
 ; clean_pollution_time = time for 'clean pollution' activity (0 = impossible)
@@ -178,7 +183,6 @@ ocean_resources = TRUE
 ;                        (lua scripting)
 ;   - NoZoc            = Units on this terrain are not generating or subject
 ;                        to zoc
-;   - NoFortify        = Units cannot fortify on this terrain
 ;   - Frozen           = Frozen/polar terrain. For water tiles, Frozen terrain
 ;                        is generated near poles. Conversion between frozen
 ;                        and unfrozen terrain can be controlled with
@@ -644,7 +648,7 @@ ui_name_base_airbase = _("?gui_type:Build Airforce base")
 ;                           "CleanPollution", "CleanFallout", "Pillage",
 ;                           "Disappear", or "Enter"
 ; infracost               = Number of infrapoints it costs to place this
-;                           extra. 0 means extra cannot be placed. Default is 1
+;                           extra. 0, the default, means extra cannot be placed.
 ; graphic                 = tag specifying preferred graphic
 ; graphic_alt             = tag for alternate graphic if preferred graphic is
 ;                           not present. Can use eg "-" for no alternate

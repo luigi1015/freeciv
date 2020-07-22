@@ -165,8 +165,7 @@ static bool insert_veteran_help(char *outbuf, size_t outlen,
       CATLSTR(outbuf, outlen, intro);
       CATLSTR(outbuf, outlen, "\n\n");
     }
-    /* raise_chance and work_raise_chance don't get to the client, so we
-     * can't report them */
+    /* TODO: Report raise_chance and work_raise_chance */
     CATLSTR(outbuf, outlen,
             /* TRANS: Header for fixed-width veteran level table.
              * TRANS: Translators cannot change column widths :(
@@ -228,18 +227,20 @@ static bool insert_generated_text(char *outbuf, size_t outlen, const char *name)
         irrigation_result = 
           (pterrain->irrigation_result == pterrain
            || pterrain->irrigation_result == T_NONE
-           || !univs_have_action_enabler(ACTION_CULTIVATE, NULL, &for_terr)) ? ""
-           : terrain_name_translation(pterrain->irrigation_result);
+           || !action_id_univs_not_blocking(ACTION_CULTIVATE, NULL, &for_terr))
+            ? ""
+            : terrain_name_translation(pterrain->irrigation_result);
         mining_result =
           (pterrain->mining_result == pterrain
            || pterrain->mining_result == T_NONE
-           || !univs_have_action_enabler(ACTION_PLANT, NULL, &for_terr)) ? ""
-           : terrain_name_translation(pterrain->mining_result);
+           || !action_id_univs_not_blocking(ACTION_PLANT, NULL, &for_terr))
+            ? ""
+            : terrain_name_translation(pterrain->mining_result);
         transform_result =
           (pterrain->transform_result == pterrain
            || pterrain->transform_result == T_NONE
-           || !univs_have_action_enabler(ACTION_TRANSFORM_TERRAIN,
-                                         NULL, &for_terr)) ? ""
+           || !action_id_univs_not_blocking(ACTION_TRANSFORM_TERRAIN,
+                                            NULL, &for_terr)) ? ""
           : terrain_name_translation(pterrain->transform_result);
         /* Use get_internal_string_length() for correct alignment with
          * multibyte character encodings */
@@ -631,6 +632,24 @@ static void insert_allows(struct universal *psource,
                          improvement_name_translation(pimprove), imprstrs,
                          buf, bufsz, prefix);
   } improvement_iterate_end;
+
+  unit_type_iterate(putype) {
+    static const char *const utstrs[] = {
+      /* TRANS: First %s is a unit type name. */
+      N_("?unittype:Allows %s (with %s but no %s)."),
+      /* TRANS: First %s is a unit type name. */
+      N_("?unittype:Allows %s (with %s)."),
+      /* TRANS: First %s is a unit type name. */
+      N_("?unittype:Allows %s (absent %s)."),
+      /* TRANS: %s is a unit type name. */
+      N_("?unittype:Allows %s."),
+      /* TRANS: %s is a unit type name. */
+      N_("?unittype:Prevents %s.")
+    };
+    insert_allows_single(psource, &putype->build_reqs,
+                         utype_name_translation(putype), utstrs,
+                         buf, bufsz, prefix);
+  } unit_type_iterate_end;
 }
 
 /************************************************************************//**
@@ -1249,7 +1268,7 @@ const struct help_item *help_iter_next(void)
   user_text, if non-NULL, will be appended to the text.
 ****************************************************************************/
 char *helptext_building(char *buf, size_t bufsz, struct player *pplayer,
-                        const char *user_text, struct impr_type *pimprove)
+                        const char *user_text, const struct impr_type *pimprove)
 {
   bool reqs = FALSE;
   struct universal source = {
@@ -1305,35 +1324,42 @@ char *helptext_building(char *buf, size_t bufsz, struct player *pplayer,
   /* (Great wonders are in their own help section explaining their
    * uniqueness, so we don't mention it here.) */
 
-  if (building_has_effect(pimprove, EFT_ENABLE_NUKE)
-      && num_role_units(action_id_get_role(ACTION_NUKE)) > 0) {
-    struct unit_type *u = get_role_unit(action_id_get_role(ACTION_NUKE), 0);
+  if (building_has_effect(pimprove, EFT_ENABLE_NUKE)) {
+    action_id nuke_actions[MAX_NUM_ACTIONS];
+    struct unit_type *u = NULL;
 
-    cat_snprintf(buf, bufsz,
-		 /* TRANS: 'Allows all players with knowledge of atomic
-		  * power to build nuclear units.' */
-		 _("* Allows all players with knowledge of %s "
-		   "to build %s units.\n"),
-                 advance_name_translation(u->require_advance),
-		 utype_name_translation(u));
+    {
+      /* Find Manhattan dependent nuke actions */
+      int i = 0;
+
+      action_list_add_all_by_result(nuke_actions, &i, ACTRES_NUKE);
+      action_list_add_all_by_result(nuke_actions, &i, ACTRES_NUKE_CITY);
+      action_list_add_all_by_result(nuke_actions, &i, ACTRES_NUKE_UNITS);
+
+      action_list_end(nuke_actions, i);
+    }
+
+    action_list_iterate(nuke_actions, act_id) {
+      if (num_role_units(action_id_get_role(act_id)) > 0) {
+        u = get_role_unit(action_id_get_role(act_id), 0);
+        break;
+      }
+    } action_list_iterate_end;
+
+    if (u) {
+      cat_snprintf(buf, bufsz,
+                   /* TRANS: 'Allows all players with knowledge of atomic
+                    * power to build nuclear units.' */
+                   _("* Allows all players with knowledge of %s "
+                     "to build %s units.\n"),
+                   advance_name_translation(u->require_advance),
+                   utype_name_translation(u));
+    }
   }
 
   insert_allows(&source, buf + strlen(buf), bufsz - strlen(buf),
                 /* TRANS: bullet point; note trailing space */
                 Q_("?bullet:* "));
-
-  unit_type_iterate(u) {
-    if (u->need_improvement == pimprove) {
-      if (A_NEVER != u->require_advance) {
-	cat_snprintf(buf, bufsz, _("* Allows %s (with %s).\n"),
-		     utype_name_translation(u),
-                     advance_name_translation(u->require_advance));
-      } else {
-	cat_snprintf(buf, bufsz, _("* Allows %s.\n"),
-		     utype_name_translation(u));
-      }
-    }
-  } unit_type_iterate_end;
 
   /* Actions that requires the building to target a city. */
   action_iterate(act) {
@@ -1641,49 +1667,38 @@ char *helptext_building(char *buf, size_t bufsz, struct player *pplayer,
 }
 
 /************************************************************************//**
-  Is unit type ever able to build an extra
-****************************************************************************/
-static bool help_is_extra_buildable(struct extra_type *pextra,
-                                    struct unit_type *ptype)
-{
-  if (!pextra->buildable) {
-    return FALSE;
-  }
-
-  return are_reqs_active(NULL, NULL, NULL, NULL, NULL,
-                         NULL, ptype, NULL, NULL, NULL, &pextra->reqs,
-                         RPT_POSSIBLE);
-}
-
-/************************************************************************//**
-  Is unit type ever able to clean out an extra
-****************************************************************************/
-static bool help_is_extra_cleanable(struct extra_type *pextra,
-                                    struct unit_type *ptype)
-{
-  return are_reqs_active(NULL, NULL, NULL, NULL, NULL,
-                         NULL, ptype, NULL, NULL, NULL, &pextra->rmreqs,
-                         RPT_POSSIBLE);
-}
-
-/************************************************************************//**
   Returns TRUE iff the specified unit type is able to perform an action
   that allows it to escape to the closest closest domestic city once done.
 
   See diplomat_escape() for more.
 ****************************************************************************/
-static bool utype_may_do_escape_action(struct unit_type *utype)
+static bool utype_may_do_escape_action(const struct unit_type *utype)
 {
-  return utype_can_do_action(utype, ACTION_SPY_POISON_ESC)
-      || utype_can_do_action(utype, ACTION_SPY_SABOTAGE_UNIT_ESC)
-      || utype_can_do_action(utype, ACTION_SPY_STEAL_TECH_ESC)
-      || utype_can_do_action(utype, ACTION_SPY_TARGETED_STEAL_TECH_ESC)
-      || utype_can_do_action(utype, ACTION_SPY_SABOTAGE_CITY_ESC)
-      || utype_can_do_action(utype, ACTION_SPY_TARGETED_SABOTAGE_CITY_ESC)
-      || utype_can_do_action(utype, ACTION_SPY_STEAL_GOLD_ESC)
-      || utype_can_do_action(utype, ACTION_STEAL_MAPS_ESC)
-      || utype_can_do_action(utype, ACTION_SPY_INCITE_CITY_ESC)
-      || utype_can_do_action(utype, ACTION_SPY_NUKE_ESC);
+  action_iterate(act_id) {
+    struct action *paction = action_by_number(act_id);
+
+    if (action_get_actor_kind(paction) != AAK_UNIT) {
+      /* Not relevant. */
+      continue;
+    }
+
+    if (!utype_can_do_action(utype, paction->id)) {
+      /* Can't do it. */
+      continue;
+    }
+
+    if (utype_is_consumed_by_action(paction, utype)) {
+      /* No escape when dead. */
+      continue;
+    }
+
+    if (paction->actor.is_unit.moves_actor == MAK_ESCAPE) {
+      /* Survives and escapes. */
+      return TRUE;
+    }
+  } action_iterate_end;
+
+  return FALSE;
 }
 
 /************************************************************************//**
@@ -1693,7 +1708,7 @@ static bool utype_may_do_escape_action(struct unit_type *utype)
   pplayer may be NULL.
 ****************************************************************************/
 char *helptext_unit(char *buf, size_t bufsz, struct player *pplayer,
-                    const char *user_text, struct unit_type *utype)
+                    const char *user_text, const struct unit_type *utype)
 {
   bool has_vet_levels;
   int flagid;
@@ -1725,57 +1740,65 @@ char *helptext_unit(char *buf, size_t bufsz, struct player *pplayer,
   }
   if (uclass_has_flag(pclass, UCF_CAN_OCCUPY_CITY)
       && !utype_has_flag(utype, UTYF_CIVILIAN)) {
+    /* TRANS: indented unit class property, preserve leading spaces */
     CATLSTR(buf, bufsz, _("  * Can occupy empty enemy cities.\n"));
   }
   if (!uclass_has_flag(pclass, UCF_TERRAIN_SPEED)) {
+    /* TRANS: indented unit class property, preserve leading spaces */
     CATLSTR(buf, bufsz, _("  * Speed is not affected by terrain.\n"));
   }
   if (!uclass_has_flag(pclass, UCF_TERRAIN_DEFENSE)) {
+    /* TRANS: indented unit class property, preserve leading spaces */
     CATLSTR(buf, bufsz, _("  * Does not get defense bonuses from terrain.\n"));
   }
   if (!uclass_has_flag(pclass, UCF_ZOC)) {
+    /* TRANS: indented unit class property, preserve leading spaces */
     CATLSTR(buf, bufsz, _("  * Not subject to zones of control.\n"));
   } else if (!utype_has_flag(utype, UTYF_IGZOC)) {
+    /* TRANS: indented unit class property, preserve leading spaces */
     CATLSTR(buf, bufsz, _("  * Subject to zones of control.\n"));
   }
   if (uclass_has_flag(pclass, UCF_DAMAGE_SLOWS)) {
+    /* TRANS: indented unit class property, preserve leading spaces */
     CATLSTR(buf, bufsz, _("  * Slowed down while damaged.\n"));
   }
-  if (uclass_has_flag(pclass, UCF_CAN_FORTIFY)
-      && !utype_has_flag(utype, UTYF_CANT_FORTIFY)) {
-    if (utype->defense_strength > 0) {
-      CATLSTR(buf, bufsz,
-              /* xgettext:no-c-format */
-              _("  * Gets a 50% defensive bonus while in cities.\n"));
-      CATLSTR(buf, bufsz,
-              /* xgettext:no-c-format */
-              _("  * May fortify, granting a 50% defensive bonus when not in "
-                "a city.\n"));
-    } else {
-      CATLSTR(buf, bufsz,
-              _("  * May fortify to stay put.\n"));
+  if (utype->defense_strength > 0) {
+    struct universal unit_is_in_city[] = {
+      { .kind = VUT_UTYPE, .value = { .utype = utype }},
+      { .kind = VUT_CITYTILE, .value = { .citytile = CITYT_CENTER }},
+    };
+    int bonus = effect_value_from_universals(
+          EFT_FORTIFY_DEFENSE_BONUS,
+          unit_is_in_city, ARRAY_SIZE(unit_is_in_city));
+
+    if (bonus > 0) {
+      cat_snprintf(buf, bufsz,
+                   /* TRANS: indented unit class property, preserve leading
+                    * spaces */
+                   _("  * Gets a %d%% defensive bonus while in cities.\n"),
+                   bonus);
     }
   }
   if (uclass_has_flag(pclass, UCF_UNREACHABLE)) {
     CATLSTR(buf, bufsz,
+            /* TRANS: indented unit class property, preserve leading spaces */
 	    _("  * Is unreachable. Most units cannot attack this one.\n"));
     if (utype_has_flag(utype, UTYF_NEVER_PROTECTS)) {
       CATLSTR(buf, bufsz,
+              /* TRANS: indented twice; preserve leading spaces */
 	      _("    * Doesn't prevent enemy units from attacking other "
                 "units on its tile.\n"));
     }
   }
-  if (uclass_has_flag(pclass, UCF_CAN_PILLAGE)) {
-    CATLSTR(buf, bufsz,
-	    _("  * Can pillage tile improvements.\n"));
-  }
   if (uclass_has_flag(pclass, UCF_DOESNT_OCCUPY_TILE)
       && !utype_has_flag(utype, UTYF_CIVILIAN)) {
     CATLSTR(buf, bufsz,
+            /* TRANS: indented unit class property, preserve leading spaces */
 	    _("  * Doesn't prevent enemy cities from working the tile it's on.\n"));
   }
   if (can_attack_non_native(utype)) {
     CATLSTR(buf, bufsz,
+            /* TRANS: indented unit class property, preserve leading spaces */
 	    _("  * Can attack units on non-native tiles.\n"));
   }
   for (flagid = UCF_USER_FLAG_1; flagid <= UCF_LAST_USER_FLAG; flagid++) {
@@ -1783,6 +1806,7 @@ char *helptext_unit(char *buf, size_t bufsz, struct player *pplayer,
       const char *helptxt = unit_class_flag_helptxt(flagid);
 
       if (helptxt != NULL) {
+        /* TRANS: indented unit class property, preserve leading spaces */
         CATLSTR(buf, bufsz, Q_("?bullet:  * "));
         CATLSTR(buf, bufsz, _(helptxt));
         CATLSTR(buf, bufsz, "\n");
@@ -1856,17 +1880,11 @@ char *helptext_unit(char *buf, size_t bufsz, struct player *pplayer,
     }
   } combat_bonus_list_iterate_end;
 
-  if (utype->need_improvement) {
-    cat_snprintf(buf, bufsz,
-                 _("* Can only be built if there is %s in the city.\n"),
-                 improvement_name_translation(utype->need_improvement));
-  }
-
-  if (utype->need_government) {
-    cat_snprintf(buf, bufsz,
-                 _("* Can only be built with %s as government.\n"),
-                 government_name_translation(utype->need_government));
-  }
+  /* Add requirement text for the unit type itself */
+  requirement_vector_iterate(&utype->build_reqs, preq) {
+    req_text_insert_nl(buf, bufsz, pplayer, preq, VERB_DEFAULT,
+                       Q_("?bullet:* "));
+  } requirement_vector_iterate_end;
 
   if (utype_has_flag(utype, UTYF_CANESCAPE)) {
     CATLSTR(buf, bufsz, _("* Can escape once stack defender is lost.\n"));
@@ -1885,9 +1903,11 @@ char *helptext_unit(char *buf, size_t bufsz, struct player *pplayer,
     CATLSTR(buf, bufsz, _("* Can only be built in games where new cities "
                           "are allowed.\n"));
     if (game.scenario.prevent_new_cities) {
+      /* TRANS: indented; preserve leading spaces */
       CATLSTR(buf, bufsz, _("  - New cities are not allowed in the current "
                             "game.\n"));
     } else {
+      /* TRANS: indented; preserve leading spaces */
       CATLSTR(buf, bufsz, _("  - New cities are allowed in the current "
                             "game.\n"));
     }
@@ -1921,7 +1941,7 @@ char *helptext_unit(char *buf, size_t bufsz, struct player *pplayer,
 
     unit_type_iterate(utype2) {
       if (utype2->converted_to == utype
-          && utype_can_do_action(utype2, ACTION_CONVERT)) {
+          && utype_can_do_action_result(utype2, ACTRES_CONVERT)) {
         types[i++] = utype_name_translation(utype2);
       }
     } unit_type_iterate_end;
@@ -2006,11 +2026,13 @@ char *helptext_unit(char *buf, size_t bufsz, struct player *pplayer,
           /* At least one type of cargo can load onto us freely.
            * The specific exceptions will be documented in cargo help. */
           CATLSTR(buf, bufsz,
+                  /* TRANS: indented; preserve leading spaces */
                   _("  * Some cargo cannot be loaded except in a city or a "
                     "base native to this transport.\n"));
         } else {
           /* No exceptions */
           CATLSTR(buf, bufsz,
+                  /* TRANS: indented; preserve leading spaces */
                   _("  * Cargo cannot be loaded except in a city or a "
                     "base native to this transport.\n"));
         }
@@ -2019,11 +2041,13 @@ char *helptext_unit(char *buf, size_t bufsz, struct player *pplayer,
         if (has_unrestricted_unload) {
           /* At least one type of cargo can unload from us freely. */
           CATLSTR(buf, bufsz,
+                  /* TRANS: indented; preserve leading spaces */
                   _("  * Some cargo cannot be unloaded except in a city or a "
                     "base native to this transport.\n"));
         } else {
           /* No exceptions */
           CATLSTR(buf, bufsz,
+                  /* TRANS: indented; preserve leading spaces */
                   _("  * Cargo cannot be unloaded except in a city or a "
                     "base native to this transport.\n"));
         }
@@ -2121,110 +2145,6 @@ char *helptext_unit(char *buf, size_t bufsz, struct player *pplayer,
       astr_free(&dlist);
     }
   }
-  if (utype_has_flag(utype, UTYF_SETTLERS)) {
-    struct universal for_utype = { .kind = VUT_UTYPE, .value = { .utype = utype }};
-    struct astring extras_and = ASTRING_INIT;
-    struct strvec *extras_vec = strvec_new();
-
-    /* Roads, rail, mines, irrigation. */
-    extra_type_by_cause_iterate(EC_ROAD, pextra) {
-      if (help_is_extra_buildable(pextra, utype)) {
-        strvec_append(extras_vec, extra_name_translation(pextra));
-      }
-    } extra_type_by_cause_iterate_end;
-    if (strvec_size(extras_vec) > 0) {
-      strvec_to_and_list(extras_vec, &extras_and);
-      /* TRANS: %s is list of extra types separated by ',' and 'and' */
-      cat_snprintf(buf, bufsz, _("* Can build %s on tiles.\n"),
-                   astr_str(&extras_and));
-      strvec_clear(extras_vec);
-    }
-
-    if (utype_can_do_action(utype, ACTION_MINE)) {
-      extra_type_by_cause_iterate(EC_MINE, pextra) {
-        if (help_is_extra_buildable(pextra, utype)) {
-          strvec_append(extras_vec, extra_name_translation(pextra));
-        }
-      } extra_type_by_cause_iterate_end;
-
-      if (strvec_size(extras_vec) > 0) {
-        strvec_to_and_list(extras_vec, &extras_and);
-        cat_snprintf(buf, bufsz, _("* Can build %s on tiles.\n"),
-                     astr_str(&extras_and));
-        strvec_clear(extras_vec);
-      }
-    }
-    if (univs_have_action_enabler(ACTION_PLANT, &for_utype, NULL)) {
-      CATLSTR(buf, bufsz, _("* Can convert terrain to another type by "
-                            "planting.\n"));
-    }
-
-    if (utype_can_do_action(utype, ACTION_IRRIGATE)) {
-      extra_type_by_cause_iterate(EC_IRRIGATION, pextra) {
-        if (help_is_extra_buildable(pextra, utype)) {
-          strvec_append(extras_vec, extra_name_translation(pextra));
-        }
-      } extra_type_by_cause_iterate_end;
-
-      if (strvec_size(extras_vec) > 0) {
-        strvec_to_and_list(extras_vec, &extras_and);
-        cat_snprintf(buf, bufsz, _("* Can build %s on tiles.\n"),
-                     astr_str(&extras_and));
-        strvec_clear(extras_vec);
-      }
-    }
-    if (univs_have_action_enabler(ACTION_CULTIVATE, &for_utype, NULL)) {
-      CATLSTR(buf, bufsz, _("* Can convert terrain to another type by "
-                            "cultivating.\n"));
-    }
-    if (univs_have_action_enabler(ACTION_TRANSFORM_TERRAIN, &for_utype, NULL)) {
-      CATLSTR(buf, bufsz, _("* Can transform terrain to another type.\n"));
-    }
-
-    extra_type_by_cause_iterate(EC_BASE, pextra) {
-      if (help_is_extra_buildable(pextra, utype)) {
-        strvec_append(extras_vec, extra_name_translation(pextra));
-      }
-    } extra_type_by_cause_iterate_end;
-
-    if (strvec_size(extras_vec) > 0) {
-      strvec_to_and_list(extras_vec, &extras_and);
-      cat_snprintf(buf, bufsz, _("* Can build %s on tiles.\n"),
-                   astr_str(&extras_and));
-      strvec_clear(extras_vec);
-    }
-
-    /* Pollution, fallout. */
-    extra_type_by_rmcause_iterate(ERM_CLEANPOLLUTION, pextra) {
-      if (help_is_extra_cleanable(pextra, utype)) {
-        strvec_append(extras_vec, extra_name_translation(pextra));
-     }
-    } extra_type_by_rmcause_iterate_end;
-
-    if (strvec_size(extras_vec) > 0) {
-      strvec_to_and_list(extras_vec, &extras_and);
-      /* TRANS: list of extras separated by "and" */
-      cat_snprintf(buf, bufsz, _("* Can clean %s from tiles.\n"),
-                   astr_str(&extras_and));
-      strvec_clear(extras_vec);
-    }
-    
-    extra_type_by_rmcause_iterate(ERM_CLEANFALLOUT, pextra) {
-      if (help_is_extra_cleanable(pextra, utype)) {
-        strvec_append(extras_vec, extra_name_translation(pextra));
-      }
-    } extra_type_by_rmcause_iterate_end;
-
-    if (strvec_size(extras_vec) > 0) {
-      strvec_to_and_list(extras_vec, &extras_and);
-      /* TRANS: list of extras separated by "and" */
-      cat_snprintf(buf, bufsz, _("* Can clean %s from tiles.\n"),
-                   astr_str(&extras_and));
-      strvec_clear(extras_vec);
-    }
-
-    strvec_destroy(extras_vec);
-  }
 
   if (utype_has_flag(utype, UTYF_SPY)) {
     CATLSTR(buf, bufsz, _("* Strong in diplomatic battles.\n"));
@@ -2247,13 +2167,6 @@ char *helptext_unit(char *buf, size_t bufsz, struct player *pplayer,
   if (utype_has_flag(utype, UTYF_ONLY_NATIVE_ATTACK)) {
     CATLSTR(buf, bufsz,
             _("* Can only attack units on native tiles.\n"));
-  }
-  if (game.info.slow_invasions
-      && utype_has_flag(utype, UTYF_BEACH_LANDER)) {
-    /* BeachLander only matters when slow_invasions are enabled. */
-    CATLSTR(buf, bufsz,
-            _("* Won't lose all movement when moving from non-native "
-              "terrain to native terrain.\n"));
   }
   if (utype_has_flag(utype, UTYF_CITYBUSTER)) {
     CATLSTR(buf, bufsz,
@@ -2281,12 +2194,16 @@ char *helptext_unit(char *buf, size_t bufsz, struct player *pplayer,
     CATLSTR(buf, bufsz,
             _("* A non-military unit:\n"));
     CATLSTR(buf, bufsz,
+            /* TRANS: indented; preserve leading spaces */
             _("  * Cannot attack.\n"));
     CATLSTR(buf, bufsz,
+            /* TRANS: indented; preserve leading spaces */
             _("  * Doesn't impose martial law.\n"));
     CATLSTR(buf, bufsz,
+            /* TRANS: indented; preserve leading spaces */
             _("  * Can enter foreign territory regardless of peace treaty.\n"));
     CATLSTR(buf, bufsz,
+            /* TRANS: indented; preserve leading spaces */
             _("  * Doesn't prevent enemy cities from working the tile it's on.\n"));
   }
   if (utype_has_flag(utype, UTYF_FIELDUNIT)) {
@@ -2383,6 +2300,32 @@ char *helptext_unit(char *buf, size_t bufsz, struct player *pplayer,
       astr_free(&list);
     }
   }
+
+  /* Auto attack immunity. (auto_attack.if_attacker ruleset setting) */
+  if (server_setting_value_bool_get(
+        server_setting_by_name("autoattack"))) {
+    bool not_an_auto_attacker = TRUE;
+
+    action_auto_perf_iterate(auto_action) {
+      if (auto_action->cause != AAPC_UNIT_MOVED_ADJ) {
+        /* Not relevant for auto attack. */
+        continue;
+      }
+
+      if (requirement_fulfilled_by_unit_type(utype, &auto_action->reqs)) {
+        /* Can be forced to auto attack. */
+        not_an_auto_attacker = FALSE;
+        break;
+      }
+    } action_auto_perf_iterate_end;
+
+    if (not_an_auto_attacker) {
+      CATLSTR(buf, bufsz,
+              _("* Will never be forced (by the autoattack server setting)"
+                " to attack units moving to an adjacent tile.\n"));
+    }
+  }
+
   action_iterate(act) {
     struct action *paction = action_by_number(act);
 
@@ -2393,6 +2336,7 @@ char *helptext_unit(char *buf, size_t bufsz, struct player *pplayer,
 
     if (utype_can_do_action(utype, act)) {
       const char *target_adjective;
+      char sub_target_text[100];
       const char *blockers[MAX_NUM_ACTIONS];
       int i = 0;
 
@@ -2420,11 +2364,20 @@ char *helptext_unit(char *buf, size_t bufsz, struct player *pplayer,
           target_adjective = "";
         }
 
+        sub_target_text[0] = '\0';
+        if (action_get_sub_target_kind(paction) != ASTK_NONE) {
+          cat_snprintf(sub_target_text, sizeof(sub_target_text), _("%s "),
+                       _(action_sub_target_kind_name(
+                           action_get_sub_target_kind(paction))));
+        }
+
         cat_snprintf(buf, bufsz,
-                     /* TRANS: The first %s may be an adjective (that
-                      * includes a space). The next is the name of its
-                      * target kind. */
-                     _("  * is done to %s%s.\n"),
+                     /* TRANS: The first %s is the sub target kind. The next
+                      * may be an adjective (that includes a space). The
+                      * next is the name of the target kind.
+                      * Example: is done to extras on foreign tiles */
+                     _("  * is done to %s%s%s.\n"),
+                     sub_target_text,
                      target_adjective,
                      _(action_target_kind_name(
                          action_id_get_target_kind(act))));
@@ -2447,12 +2400,55 @@ char *helptext_unit(char *buf, size_t bufsz, struct player *pplayer,
                        action_get_battle_kind(paction)));
       }
 
+      {
+        int odds = action_dice_roll_initial_odds(paction);
+
+        if (odds != ACTION_ODDS_PCT_DICE_ROLL_NA) {
+          /* TODO: try to detect that the odds always will be 100% because
+           * of the Action_Odds_Pct effect. */
+          cat_snprintf(buf, bufsz,
+                       _("  * may fail because of a dice throw.\n"));
+        }
+      }
+
+      if (!utype_is_consumed_by_action(paction, utype)
+          && paction->actor.is_unit.moves_actor == MAK_ESCAPE) {
+        cat_snprintf(buf, bufsz,
+                     /* TRANS: said about an action. %s is a unit type
+                      * name. */
+                     _("  * the %s may be captured while trying to"
+                       " escape after completing the mission.\n"),
+                     utype_name_translation(utype));
+      }
+
+      {
+        struct universal req_pattern[] = {
+          { .kind = VUT_ACTION, .value.action = paction },
+          { .kind = VUT_UTYPE,  .value.utype = utype },
+        };
+        int success_move_frag_cost = effect_value_from_universals(
+            EFT_ACTION_SUCCESS_MOVE_COST,
+            req_pattern, ARRAY_SIZE(req_pattern));
+
+        success_move_frag_cost += utype_pays_mp_for_action_base(paction,
+                                                                utype);
+
+        /* Can't print the exact amount of move fragments. It isn't known.
+         * The action performer function may subtract some movement itself
+         * on top of what EFT_ACTION_SUCCESS_MOVE_COST takes. */
+        if (MAX_MOVE_FRAGS <= success_move_frag_cost) {
+          /* A value this size takes all the actor unit's move fragments. */
+          cat_snprintf(buf, bufsz,
+                       _("  * ends this unit's turn.\n"));
+        }
+      }
+
       if (action_id_get_target_kind(act) != ATK_SELF) {
         /* Distance to target is relevant. */
 
         /* FIXME: move paratroopers_range to the action and remove this
          * variable once actions are generalized. */
-        int relative_max = action_has_result(paction, ACTION_PARADROP) ?
+        int relative_max = action_has_result(paction, ACTRES_PARADROP) ?
               MIN(paction->max_distance, utype->paratroopers_range) :
               paction->max_distance;
 
@@ -2513,16 +2509,101 @@ char *helptext_unit(char *buf, size_t bufsz, struct player *pplayer,
         }
       }
 
-      /* Custom action specific information. */
-      switch (act) {
-      case ACTION_HELP_WONDER:
+      /* The action may be a Casus Belli. */
+      {
+        const struct {
+          const enum effect_type eft;
+          const char *hlp_text;
+        } casus_belli[] = {
+          /* TRANS: ...performing this action ... Casus Belli */
+          { EFT_CASUS_BELLI_SUCCESS, N_("successfully") },
+          /* TRANS: ...performing this action ... Casus Belli */
+          { EFT_CASUS_BELLI_CAUGHT, N_("getting caught before") },
+        };
+
+        struct universal req_pattern[] = {
+          { .kind = VUT_ACTION,  .value.action = paction },
+          { .kind = VUT_DIPLREL, /* value filled in later */ },
+        };
+
+        /* First group by effect (currently getting caught and successfully
+         * performing the action) */
+        for (i = 0; i < ARRAY_SIZE(casus_belli); i++) {
+          int diplrel;
+
+          /* DiplRel list of each Casus Belli size. */
+          const char *victim_diplrel_names[DRO_LAST];
+          const char *outrage_diplrel_names[DRO_LAST];
+          int victim_diplrel_count = 0;
+          int outrage_diplrel_count = 0;
+
+          /* Ignore Team and everything in diplrel_other. */
+          for (diplrel = 0; diplrel < DS_NO_CONTACT; diplrel++) {
+            int casus_belli_amount;
+
+            if (!can_utype_do_act_if_tgt_diplrel(utype, act,
+                                                 diplrel, TRUE)) {
+              /* Can't do the action. Can't give Casus Belli. */
+              continue;
+            }
+
+            req_pattern[1].value.diplrel = diplrel;
+            casus_belli_amount = effect_value_from_universals(
+                casus_belli[i].eft,
+                req_pattern, ARRAY_SIZE(req_pattern));
+
+            if (CASUS_BELLI_OUTRAGE <= casus_belli_amount) {
+              outrage_diplrel_names[outrage_diplrel_count++] =
+                  diplrel_name_translation(diplrel);
+            } else if (CASUS_BELLI_VICTIM <= casus_belli_amount) {
+              victim_diplrel_names[victim_diplrel_count++] =
+                  diplrel_name_translation(diplrel);
+            }
+          }
+
+          /* Then group by Casus Belli size (currently victim and
+           * international outrage) */
+          if (outrage_diplrel_count > 0) {
+            struct astring list = ASTRING_INIT;
+            cat_snprintf(buf, bufsz,
+                         /* TRANS: successfully ... Peace, or Alliance  */
+                         _("  * %s performing this action during %s causes"
+                           " international outrage: the whole world gets "
+                           "Casus Belli against you.\n"),
+                         _(casus_belli[i].hlp_text),
+                         astr_build_or_list(&list, outrage_diplrel_names,
+                                            outrage_diplrel_count));
+            astr_free(&list);
+          }
+          if (victim_diplrel_count > 0) {
+            struct astring list = ASTRING_INIT;
+            cat_snprintf(buf, bufsz,
+                         /* TRANS: successfully ... Peace, or Alliance  */
+                         _("  * %s performing this action during %s gives"
+                           " the victim Casus Belli against you.\n"),
+                         _(casus_belli[i].hlp_text),
+                         astr_build_or_list(&list, victim_diplrel_names,
+                                            victim_diplrel_count));
+            astr_free(&list);
+          }
+        }
+      }
+
+      /* Custom action result specific information. */
+      switch (paction->result) {
+      case ACTRES_HELP_WONDER:
         cat_snprintf(buf, bufsz,
                      /* TRANS: the %d is the number of shields the unit can
                       * contribute. */
                      _("  * adds %d production.\n"),
                      utype_build_shield_cost_base(utype));
         break;
-      case ACTION_FOUND_CITY:
+      case ACTRES_HEAL_UNIT:
+        cat_snprintf(buf, bufsz,
+                     _("  * restores up to 25%% of the target unit's"
+                       " hit points.\n"));
+        break;
+      case ACTRES_FOUND_CITY:
         if (game.scenario.prevent_new_cities) {
           cat_snprintf(buf, bufsz,
                        /* TRANS: is talking about an action. */
@@ -2535,7 +2616,7 @@ char *helptext_unit(char *buf, size_t bufsz, struct player *pplayer,
                          utype->city_size),
                      utype->city_size);
         break;
-      case ACTION_JOIN_CITY:
+      case ACTRES_JOIN_CITY:
         cat_snprintf(buf, bufsz,
                      /* TRANS: the %d is population. */
                      PL_("  * max target size: %d.\n",
@@ -2549,7 +2630,7 @@ char *helptext_unit(char *buf, size_t bufsz, struct player *pplayer,
                          utype_pop_value(utype)),
                      utype_pop_value(utype));
         break;
-      case ACTION_BOMBARD:
+      case ACTRES_BOMBARD:
         cat_snprintf(buf, bufsz,
                      /* TRANS: %d is bombard rate. */
                      _("  * %d per turn.\n"),
@@ -2561,28 +2642,22 @@ char *helptext_unit(char *buf, size_t bufsz, struct player *pplayer,
                        " defenders on a tile, and have no risk for the"
                        " attacker.\n"));
         break;
-      case ACTION_UPGRADE_UNIT:
+      case ACTRES_UPGRADE_UNIT:
         cat_snprintf(buf, bufsz,
                      /* TRANS: %s is a unit type. */
                      _("  * upgraded to %s or, when possible, to the unit "
                        "type it upgrades to.\n"),
                      utype_name_translation(utype->obsoleted_by));
         break;
-      case ACTION_ATTACK:
-      case ACTION_SUICIDE_ATTACK:
+      case ACTRES_ATTACK:
         if (game.info.tired_attack) {
           cat_snprintf(buf, bufsz,
                        _("  * weaker when tired. If performed with less "
                          "than a single move point left the attack power "
                          "is reduced accordingly.\n"));
         }
-        if (action_has_result(paction, ACTION_ATTACK)
-            && utype_has_flag(utype, UTYF_ONEATTACK)) {
-          cat_snprintf(buf, bufsz,
-                       _("  * ends this unit's turn.\n"));
-        }
         break;
-      case ACTION_CONVERT:
+      case ACTRES_CONVERT:
         cat_snprintf(buf, bufsz,
                      /* TRANS: %s is a unit type. "MP" = movement points. */
                      PL_("  * is converted into %s (takes %d MP).\n",
@@ -2591,11 +2666,146 @@ char *helptext_unit(char *buf, size_t bufsz, struct player *pplayer,
                      utype_name_translation(utype->converted_to),
                      utype->convert_time);
         break;
+      case ACTRES_SPY_NUKE:
+      case ACTRES_NUKE:
+      case ACTRES_NUKE_CITY:
+      case ACTRES_NUKE_UNITS:
+        if (game.info.nuke_pop_loss_pct > 0) {
+          cat_snprintf(buf, bufsz,
+                       /* TRANS: percentage */
+                       _("  * %d%% of the population of each city inside"
+                         " the nuclear blast dies.\n"),
+                         game.info.nuke_pop_loss_pct);
+        }
+        if (game.info.nuke_defender_survival_chance_pct > 0) {
+          cat_snprintf(buf, bufsz,
+                       _("  * all units caught in the open by the nuclear"
+                         " blast dies.\n"));
+          cat_snprintf(buf, bufsz,
+                       /* TRANS: percentage */
+                       _("  * a unit caught in the nuclear blast while"
+                         " inside a city has a %d%% chance of survival.\n"),
+                         game.info.nuke_defender_survival_chance_pct);
+        } else {
+          cat_snprintf(buf, bufsz,
+                       _("  * all units caught in the nuclear blast"
+                         " dies.\n"));
+        }
+
+        break;
+      case ACTRES_PLANT:
+      case ACTRES_CULTIVATE:
+      case ACTRES_TRANSFORM_TERRAIN:
+        cat_snprintf(buf, bufsz,
+                     _("  * converts target tile terrain to another"
+                       " type.\n"));
+        break;
+      case ACTRES_ROAD:
+      case ACTRES_MINE:
+      case ACTRES_IRRIGATE:
+      case ACTRES_BASE:
+        {
+          struct astring extras_and = ASTRING_INIT;
+          struct strvec *extras_vec = strvec_new();
+
+          extra_type_iterate(pextra) {
+            if (action_creates_extra(paction, pextra)) {
+              strvec_append(extras_vec, extra_name_translation(pextra));
+            }
+          } extra_type_iterate_end;
+
+          if (strvec_size(extras_vec) > 0) {
+            strvec_to_and_list(extras_vec, &extras_and);
+            /* TRANS: %s is list of extra types separated by ',' and 'and' */
+            cat_snprintf(buf, bufsz, _("  * builds %s on tiles.\n"),
+                         astr_str(&extras_and));
+            strvec_clear(extras_vec);
+          }
+
+          strvec_destroy(extras_vec);
+        }
+        break;
+      case ACTRES_CLEAN_POLLUTION:
+      case ACTRES_CLEAN_FALLOUT:
+        {
+          struct astring extras_and = ASTRING_INIT;
+          struct strvec *extras_vec = strvec_new();
+
+          extra_type_iterate(pextra) {
+            if (action_removes_extra(paction, pextra)) {
+              strvec_append(extras_vec, extra_name_translation(pextra));
+            }
+          } extra_type_iterate_end;
+
+          if (strvec_size(extras_vec) > 0) {
+            strvec_to_and_list(extras_vec, &extras_and);
+            /* TRANS: list of extras separated by "and" */
+            cat_snprintf(buf, bufsz, _("  * cleans %s from tiles.\n"),
+                         astr_str(&extras_and));
+            strvec_clear(extras_vec);
+          }
+
+          strvec_destroy(extras_vec);
+        }
+        break;
+      case ACTRES_PILLAGE:
+        {
+          struct astring extras_and = ASTRING_INIT;
+          struct strvec *extras_vec = strvec_new();
+
+          extra_type_iterate(pextra) {
+            if (action_removes_extra(paction, pextra)) {
+              strvec_append(extras_vec, extra_name_translation(pextra));
+            }
+          } extra_type_iterate_end;
+
+          if (strvec_size(extras_vec) > 0) {
+            strvec_to_and_list(extras_vec, &extras_and);
+            /* TRANS: list of extras separated by "and" */
+            cat_snprintf(buf, bufsz, _("  * pillages %s from tiles.\n"),
+                         astr_str(&extras_and));
+            strvec_clear(extras_vec);
+          }
+
+          strvec_destroy(extras_vec);
+        }
+        break;
+      case ACTRES_FORTIFY:
+        {
+          struct universal unit_is_fortified[] = {
+            { .kind = VUT_ACTIVITY,
+              .value = { .activity = ACTIVITY_FORTIFIED }},
+            { .kind = VUT_UTYPE, .value = { .utype = utype }},
+          };
+          int bonus = effect_value_from_universals(
+                EFT_FORTIFY_DEFENSE_BONUS,
+                unit_is_fortified, ARRAY_SIZE(unit_is_fortified));
+
+          if (utype->defense_strength <= 0
+              || (effect_cumulative_max(EFT_FORTIFY_DEFENSE_BONUS,
+                                        &(struct universal){
+                                          .kind = VUT_UTYPE,
+                                          .value = { .utype = utype }})
+                  <= 0)) {
+            cat_snprintf(buf, bufsz,
+                         /* TRANS: indented unit action property, preserve
+                          * leading spaces */
+                         _("  * to stay put. No defensive bonus.\n"));
+          } else if (bonus > 0) {
+            cat_snprintf(buf, bufsz,
+                         /* TRANS: indented unit action property, preserve
+                          * leading spaces */
+                         _("  * granting a %d%% defensive bonus.\n"),
+                         bonus);
+          }
+        }
+        break;
       default:
         /* No action specific details. */
         break;
       }
 
+      i = 0;
       action_iterate(blocker) {
         if (!utype_can_do_action(utype, blocker)) {
           /* Can't block since never legal. */
@@ -2692,21 +2902,25 @@ char *helptext_unit(char *buf, size_t bufsz, struct player *pplayer,
       if (utype_can_do_action(utype, ACTION_ATTACK)
           || utype->defense_strength > 0) {
         CATLSTR(buf, bufsz,
+                /* TRANS: indented; preserve leading spaces */
                 _("  * Veterans have increased strength in combat.\n"));
       }
       /* SUPERSPY always wins/escapes */
       if (utype_has_flag(utype, UTYF_DIPLOMAT)
           && !utype_has_flag(utype, UTYF_SUPERSPY)) {
         CATLSTR(buf, bufsz,
+                /* TRANS: indented; preserve leading spaces */
                 _("  * Veterans have improved chances in diplomatic "
                   "contests.\n"));
         if (utype_may_do_escape_action(utype)) {
           CATLSTR(buf, bufsz,
+                /* TRANS: indented; preserve leading spaces */
                   _("  * Veterans are more likely to survive missions.\n"));
         }
       }
       if (utype_has_flag(utype, UTYF_SETTLERS)) {
         CATLSTR(buf, bufsz,
+                /* TRANS: indented; preserve leading spaces */
                 _("  * Veterans work faster.\n"));
       }
     }
@@ -2804,6 +3018,7 @@ void helptext_advance(char *buf, size_t bufsz, struct player *pplayer,
       if (!techs_have_fixed_costs()
           && research_invention_reachable(presearch, i)) {
         CATLSTR(buf, bufsz,
+                /* TRANS: preserve leading space */
                 _(" This number may vary depending on what "
                   "other players research.\n"));
       } else {
@@ -3041,13 +3256,6 @@ void helptext_terrain(char *buf, size_t bufsz, struct player *pplayer,
     CATLSTR(buf, bufsz,
             _("* Units on this terrain may impose a zone of control, or "
               "be restricted by one.\n"));
-  }
-  if (terrain_has_flag(pterrain, TER_NO_FORTIFY)) {
-    CATLSTR(buf, bufsz,
-            _("* No units can fortify on this terrain.\n"));
-  } else {
-    CATLSTR(buf, bufsz,
-            _("* Units able to fortify may do so on this terrain.\n"));
   }
   for (flagid = TER_USER_1 ; flagid <= TER_USER_LAST; flagid++) {
     if (terrain_has_flag(pterrain, flagid)) {
@@ -3534,6 +3742,7 @@ void helptext_extra(char *buf, size_t bufsz, struct player *pplayer,
 
       if (extra_has_flag(pextra, EF_NATIVE_TILE)) {
         CATLSTR(buf, bufsz,
+                /* TRANS: indented; preserve leading spaces */
                 _("  * Such units can move onto this tile even if it would "
                   "not normally be suitable terrain.\n"));
       }
@@ -3541,17 +3750,20 @@ void helptext_extra(char *buf, size_t bufsz, struct player *pplayer,
         if (base_has_flag(pbase, BF_NOT_AGGRESSIVE)) {
           /* "3 tiles" is hardcoded in is_friendly_city_near() */
           CATLSTR(buf, bufsz,
+                  /* TRANS: indented; preserve leading spaces */
                   _("  * Such units situated here are not considered aggressive "
                     "if this tile is within 3 tiles of a friendly city.\n"));
         }
         if (territory_claiming_base(pbase)) {
           CATLSTR(buf, bufsz,
+                  /* TRANS: indented; preserve leading spaces */
                   _("  * Can be captured by such units if at war with the "
                     "nation that currently owns it.\n"));
         }
       }
       if (pextra->defense_bonus) {
         cat_snprintf(buf, bufsz,
+                     /* TRANS: indented; preserve leading spaces */
                      _("  * Such units get a %d%% defense bonus on this "
                        "tile.\n"),
                      pextra->defense_bonus);
@@ -3818,7 +4030,7 @@ void helptext_government(char *buf, size_t bufsz, struct player *pplayer,
   effect_list_iterate(get_req_source_effects(&source), peffect) {
     Output_type_id output_type = O_LAST;
     struct unit_class *unitclass = NULL;
-    struct unit_type *unittype = NULL;
+    const struct unit_type *unittype = NULL;
     enum unit_type_flag_id unitflag = unit_type_flag_id_invalid();
     struct strvec *outputs = strvec_new();
     struct astring outputs_or = ASTRING_INIT;
@@ -4357,7 +4569,7 @@ void helptext_government(char *buf, size_t bufsz, struct player *pplayer,
          * the same range as WASTE_BY_DISTANCE */
         /* FIXME: use different wording? */
         net_value = (net_value + 39) / 40; /* round up */
-        /* fall through to: */
+        fc__fallthrough; /* fall through to: */
       case EFT_OUTPUT_WASTE_BY_DISTANCE:
         if (world_value_valid) {
           if (net_value >= 300) {
@@ -4410,14 +4622,6 @@ void helptext_government(char *buf, size_t bufsz, struct player *pplayer,
 
   } effect_list_iterate_end;
 
-  unit_type_iterate(utype) {
-    if (utype->need_government == gov) {
-      cat_snprintf(buf, bufsz,
-                   _("* Allows you to build %s.\n"),
-                   utype_name_translation(utype));
-    }
-  } unit_type_iterate_end;
-
   /* Action immunity */
   action_iterate(act) {
     if (action_by_number(act)->quiet) {
@@ -4427,6 +4631,8 @@ void helptext_government(char *buf, size_t bufsz, struct player *pplayer,
 
     if (action_immune_government(gov, act)) {
       cat_snprintf(buf, bufsz,
+                   /* TRANS: action name ... action target
+                    * ("individual units", etc) */
                    _("* Makes it impossible to do the action \'%s\'"
                      " to your %s.\n"),
                    action_id_name_translation(act),
@@ -4443,7 +4649,7 @@ void helptext_government(char *buf, size_t bufsz, struct player *pplayer,
 /************************************************************************//**
   Returns pointer to static string with eg: "1 shield, 1 unhappy"
 ****************************************************************************/
-char *helptext_unit_upkeep_str(struct unit_type *utype)
+char *helptext_unit_upkeep_str(const struct unit_type *utype)
 {
   static char buf[128];
   int any = 0;

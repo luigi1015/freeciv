@@ -9,7 +9,7 @@ add_gtk3_env() {
   cp -R $1/share/locale $2/share/ &&
   cp -R $1/share/icons/Adwaita $2/share/icons/ &&
   mkdir -p $2/share/glib-2.0/schemas &&
-  cp -R $1/share/glib-2.0/schemas/gschemas.compiled $2/share/glib-2.0/schemas/ &&
+  cp -R $1/share/glib-2.0/schemas/*.gschema.xml $2/share/glib-2.0/schemas/ &&
   cp $1/bin/libgtk-3-0.dll $2/ &&
   cp $1/bin/libgdk-3-0.dll $2/ &&
   cp $1/bin/libglib-2.0-0.dll $2/ &&
@@ -24,16 +24,16 @@ add_gtk3_env() {
   cp $1/bin/libpango-1.0-0.dll $2/ &&
   cp $1/bin/libpangocairo-1.0-0.dll $2/ &&
   cp $1/bin/libpcre-1.dll $2/ &&
-  cp $1/bin/libffi-6.dll $2/ &&
+  cp $1/bin/libffi-7.dll $2/ &&
   cp $1/bin/libatk-1.0-0.dll $2/ &&
   cp $1/bin/libgmodule-2.0-0.dll $2/ &&
   cp $1/bin/libpangowin32-1.0-0.dll $2/ &&
   cp $1/bin/libfontconfig-1.dll $2/ &&
-  cp $1/bin/libfreetype-6.dll $2/ &&
   cp $1/bin/libpangoft2-1.0-0.dll $2/ &&
   cp $1/bin/libxml2-2.dll $2/ &&
   cp $1/bin/libharfbuzz-0.dll $2/ &&
   mkdir -p $2/bin &&
+  cp $1/bin/glib-compile-schemas.exe $2/bin/ &&
   cp $1/bin/gdk-pixbuf-query-loaders.exe $2/bin/ &&
   cp $1/bin/gtk-update-icon-cache.exe $2/bin/ &&
   cp ./helpers/installer-helper-gtk3.cmd $2/bin/installer-helper.cmd
@@ -78,14 +78,11 @@ add_common_env() {
   cp $1/bin/libsqlite3-0.dll $2/ &&
   cp $1/bin/libiconv-2.dll $2/ &&
   cp $1/bin/libz.dll.1.2.11 $2/ &&
-  ( test "x$SETUP" != "xwin32" ||
-    ( cp $1/lib/icuuc58.dll $2/ &&
-      cp $1/lib/icudt58.dll $2/ )) &&
-  ( test "x$SETUP" = "xwin32" ||
-    ( cp $1/lib/icuuc62.dll $2/ &&
-      cp $1/lib/icudt62.dll $2/ )) &&
+  cp $1/lib/icuuc63.dll     $2/ &&
+  cp $1/lib/icudt63.dll     $2/ &&
   cp $1/bin/libpng16-16.dll $2/ &&
-  cp $1/bin/libintl.dll     $2/
+  cp $1/bin/libintl.dll     $2/ &&
+  cp $1/bin/libfreetype-6.dll $2/
 }
 
 if test "x$1" = x || test "x$1" = "x-h" || test "x$1" = "x--help" || test "x$2" = "x" ; then
@@ -99,6 +96,7 @@ GUI="$2"
 case $GUI in
   gtk3.22)
     GUINAME="GTK3.22"
+    MPGUI="gtk3"
     FCMP="gtk3" ;;
   qt)
     GUINAME="Qt"
@@ -218,6 +216,11 @@ else
         exit 1
       fi ;;
     qt)
+      if ! cp freeciv-ruledit.cmd $INSTDIR/
+      then
+        echo "Adding cmd-file failed!" >&2
+        exit 1
+      fi
       if ! add_qt_env $DLLSPATH $INSTDIR ; then
         echo "Copying Qt environment failed!" >&2
         exit 1
@@ -230,13 +233,20 @@ else
   esac
 
   if test "x$GUI" = "xsdl2" ; then
-    if ! ./create-freeciv-sdl2-nsi.sh $INSTDIR $VERREV $SETUP > Freeciv-$SETUP-$VERREV-$GUI.nsi
+    if ! ./create-freeciv-sdl2-nsi.sh $INSTDIR $VERREV $SETUP > Freeciv-$SETUP-$VERREV-$GUI.nsi helpers/uninstaller-helper-gtk3.sh
     then
       exit 1
     fi
-  elif ! ./create-freeciv-gtk-qt-nsi.sh $INSTDIR $VERREV $GUI $GUINAME $SETUP > Freeciv-$SETUP-$VERREV-$GUI.nsi
-  then
-    exit 1
+  else
+    if test "x$GUI" = "xgtk3.22" ; then
+      UNINSTALLER="helpers/uninstaller-helper-gtk3.sh"
+    else
+      UNINSTALLER=""
+    fi
+    if ! ./create-freeciv-gtk-qt-nsi.sh $INSTDIR $VERREV $GUI $GUINAME $SETUP $MPGUI > Freeciv-$SETUP-$VERREV-$GUI.nsi $UNINSTALLER
+    then
+      exit 1
+    fi
   fi
 
   mkdir -p Output

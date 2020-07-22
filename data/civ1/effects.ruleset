@@ -1336,6 +1336,25 @@ reqs    =
       "Extra", "Fortress", "Local"
     }
 
+[effect_fortified]
+type    = "Fortify_Defense_Bonus"
+value   = 50
+reqs    =
+    { "type", "name", "range"
+      "Activity", "Fortified", "Local"
+    }
+
+[effect_city_fortified]
+type    = "Fortify_Defense_Bonus"
+value   = 50
+reqs    =
+    { "type",          "name",         "range", "present"
+      "CityTile",      "Center",       "Local", TRUE
+      "Activity",      "Fortified",    "Local", FALSE
+      "UnitClassFlag", "CanFortify",   "Local", TRUE
+      "UnitFlag",      "Cant_Fortify", "Local", FALSE
+    }
+
 [effect_incite_cost_empty]
 type = "Incite_Cost_Pct"
 value = -50
@@ -1359,6 +1378,10 @@ reqs	=
     { "type", "name", "range", "present"
       "Action", "Found City", "Local", FALSE
       "Action", "Join City", "Local", FALSE
+      "Action", "Transport Board", "Local", FALSE
+      "Action", "Transport Alight", "Local", FALSE
+      "Action", "Transport Disembark", "Local", FALSE
+      "Action", "Transport Disembark 2", "Local", FALSE
     }
 
 [effect_incident_success_steal_tech]
@@ -1414,6 +1437,22 @@ reqs	=
       "Action", "Explode Nuclear", "Local", TRUE
     }
 
+[effect_incident_success_explode_nuke_city]
+type	= "Casus_Belli_Success"
+value	= 1
+reqs	=
+    { "type", "name", "range", "present"
+      "Action", "Nuke City", "Local", TRUE
+    }
+
+[effect_incident_success_explode_nuke_units]
+type	= "Casus_Belli_Success"
+value	= 1
+reqs	=
+    { "type", "name", "range", "present"
+      "Action", "Nuke Units", "Local", TRUE
+    }
+
 ; Double (+100%) buy cost for Great Wonders
 [effect_great_wonder_buy_cost]
 type    = "Building_Buy_Cost_Pct"
@@ -1421,4 +1460,38 @@ value   = 100
 reqs    =
     { "type", "name", "range"
       "BuildingGenus", "GreatWonder", "Local"
+    }
+
+; Civilization I took all remaining move fragments when a land unit
+; disembarked from a ship. It didn't take all remaining more fragments when
+; the same land unit alighted a ship in the city it was in.
+; Correct this rule if I'm wrong.
+[effect_action_success_move_cost_disembark]
+type    = "Action_Success_Actor_Move_Cost"
+value   = 65535
+reqs    =
+    { "type", "name", "range", "present"
+      "Action", "Transport Disembark", "Local", TRUE
+    }
+
+; Civilization 1 took all remaining move fragments when a land unit
+; embarked to a ship. It didn't take all remaining more fragments when the
+; same land unit boarded a ship in the city it was in.
+; Correct this rule if I'm wrong.
+; TODO: was transferring from a transport to a transport on an adjacent tile
+; legal? What was it's move cost?
+[effect_action_success_move_cost_embark]
+type    = "Action_Success_Actor_Move_Cost"
+value   = 65535
+reqs    =
+    { "type", "name", "range", "present"
+      "Action", "Transport Embark", "Local", TRUE
+    }
+
+[effect_unit_shield_value_recycle]
+type    = "Unit_Shield_Value_Pct"
+value   = -50
+reqs    =
+    { "type",   "name",         "range", "present"
+      "Action", "Recycle Unit", "Local", TRUE
     }

@@ -15,7 +15,8 @@ priority = 3
 ;version = ""
 
 ; Summary and full description of the tileset.
-summary = _("Tileset combining Hexemplio's terrains and Cimpletoon's units with orientation.")
+summary = _("Large iso-hex tileset combining Hexemplio's terrains \
+and Cimpletoon's units with orientation.")
 ;description = ""
 
 ; TODO: add more overall information fields on tiles, 
@@ -117,7 +118,7 @@ layer_order =
   "Grid1",      ; Grid layer for isometric tilesets.
   "City1",      ; City and walls.
   "Special2",   ; 2nd layer for extras with "3Layers" and "Single2" styles.
-  "Fog",        ; Fog of war (on tiles one knows but doesn't see).
+  "Fog",        ; Fog of war (on tiles one knows but doesn`t see).
   "Unit",       ; Units except the selected one(s).
   "Special3",   ; 3rd layer for extras with "3Layers" style, and base flags.
   "City2",      ; City size when the city bar is disabled.
@@ -128,7 +129,8 @@ layer_order =
   "FocusUnit",  ; The focused unit(s).
   "Goto",       ; Goto turn count and intermediate points, *not* goto lines.
   "WorkerTask", ; The unit task indicators ("G", "S", ...).
-  "Editor"      ; Editor stuff (selected tile and start points).
+  "Editor",     ; Editor stuff (selected tile and start points).
+  "InfraWork"   ; Icons for the extras being placed.
 
 ; This is special because it gets freed and reloaded as required:
 main_intro_file    = "misc/intro"

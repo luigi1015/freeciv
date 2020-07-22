@@ -162,7 +162,13 @@ static int dai_evaluate_tile_for_air_attack(struct unit *punit,
 
   balanced_cost = build_cost_balanced(unit_type_get(punit));
 
-  sortie_time = (unit_has_type_flag(punit, UTYF_ONEATTACK) ? 1 : 0);
+  sortie_time = (utype_pays_mp_for_action_estimate(
+                 action_by_number(ACTION_ATTACK),
+                 unit_type_get(punit), unit_owner(punit),
+                 /* Assume that dst_tile is closer to the tile the actor
+                  * unit will attack from than its current tile. */
+                 dst_tile,
+                 dst_tile) >= MAX_MOVE_FRAGS ? 1 : 0);
 
   profit = kill_desire(victim_cost, unit_attack, unit_cost, victim_defence, 1) 
     - SHIELD_WEIGHTING + 2 * TRADE_WEIGHTING;
@@ -467,15 +473,16 @@ bool dai_choose_attacker_air(struct ai_type *ait, struct player *pplayer,
     }
 
     /* Temporary hack because pathfinding can't handle Fighters. */
-    if (!utype_can_do_action(punittype, ACTION_SUICIDE_ATTACK)
+    if (!utype_is_consumed_by_action_result(ACTRES_ATTACK, punittype)
         && 1 == utype_fuel(punittype)) {
       continue;
     }
 
     if (can_city_build_unit_now(pcity, punittype)) {
       struct unit *virtual_unit =
-	unit_virtual_create(pplayer, pcity, punittype,
-                            do_make_unit_veteran(pcity, punittype));
+       unit_virtual_create(
+          pplayer, pcity, punittype,
+          city_production_unit_veteran_level(pcity, punittype));
       int profit = find_something_to_bomb(ait, virtual_unit, NULL, NULL);
 
       if (profit > choice->want) {

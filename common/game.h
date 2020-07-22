@@ -240,8 +240,6 @@ struct civ_game {
       struct rgbcolor_list *plr_colors;
 
       struct section_file *luadata;
-      int nuke_pop_loss_pct;
-      int nuke_defender_survival_chance_pct;
 
       struct {
         int turns;
@@ -361,7 +359,7 @@ extern struct world wld;
 #define GAME_DEFAULT_ANGRYCITIZEN TRUE
 
 #define GAME_DEFAULT_END_TURN    5000
-#define GAME_MIN_END_TURN        0
+#define GAME_MIN_END_TURN        1
 #define GAME_MAX_END_TURN        32767
 
 #define GAME_DEFAULT_MIN_PLAYERS     1
@@ -813,8 +811,6 @@ extern struct world wld;
 #define RS_DEFAULT_CIVIL_WAR_CELEB               -5
 #define RS_DEFAULT_CIVIL_WAR_UNHAPPY             5
 
-#define RS_DEFAULT_SLOW_INVASIONS                TRUE
-
 #define RS_DEFAULT_TIRED_ATTACK                  FALSE
 #define RS_DEFAULT_ONLY_KILLING_VETERAN          FALSE
 #define RS_DEFAULT_NUKE_POP_LOSS_PCT             50
@@ -852,7 +848,12 @@ extern struct world wld;
 #define RS_DEFAULT_FORCE_EXPLODE_NUCLEAR         FALSE
 
 #define RS_DEFAULT_POISON_EMPTIES_FOOD_STOCK     FALSE
-#define RS_DEFAULT_BOMBARD_MAX_RANGE             1
+#define RS_DEFAULT_STEAL_MAP_REVEALS_CITIES      TRUE
+#define RS_DEFAULT_ACTION_ACTOR_CONSUMING_ALWAYS FALSE
+#define RS_DEFAULT_USER_ACTION_TARGET_KIND       ATK_UNIT
+#define RS_DEFAULT_ACTION_MIN_RANGE              0
+#define RS_DEFAULT_ACTION_MAX_RANGE              1
+#define RS_DEFAULT_EXPLODE_NUCLEAR_MAX_RANGE     0
 
 #define RS_ACTION_NO_MAX_DISTANCE                "unlimited"
 

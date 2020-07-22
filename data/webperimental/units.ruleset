@@ -37,6 +37,7 @@ flags =
     _("Airbase")
     _("Transform")
     _("AirAttacker"), _("Very bad at attacking AEGIS.")
+    _("SupplyLines"), _("Can slow down (take 1 MP from) an enemy unit by disrupting its supply lines.")
     _("Horse"), _("Attack value halved when attacking Pikemen.")
     _("Helicopter"), _("Defends very badly against Fighters.")
     _("Unbribable")
@@ -48,9 +49,10 @@ flags =
     _("Infra"), _("Can build infrastructure.")
     _("Paratroopers"), _("Can be paradropped from a friendly city or suitable base.")
     _("Marines"), _("Can launch attack from non-native tiles.")
+    _("Cant_Fortify")
   }
 
-; Names for custom unit class flags. There can be up to 8 of these.
+; Names for custom unit class flags. There can be up to 12 of these.
 ; name          = rule name; In some circumstances user may see this
 ;                 as part of some sentences, so try to make it descriptive
 ;                 and sensible.
@@ -59,6 +61,9 @@ flags =
 class_flags =
   { "name", "helptxt"
     _("AttFromNonNative"), _("Can launch attack from non-native tiles.")
+    _("Missile")
+    _("CanPillage")
+    _("CanFortify"), _("Gets a 50% defensive bonus while in cities.")
   }
 
 [veteran_system]
@@ -120,7 +125,6 @@ veteran_move_bonus = 0, 0, 0, 0
 ; "TerrainDefense"    = Units gain defense bonus from terrain
 ; "DamageSlows"       = Damaged units are slowed down
 ; "CanOccupyCity"     = Military units of this class can occupy enemy cities
-; "Missile"           = Unit is destroyed when it attacks
 ; "BuildAnywhere"     = Unit can be built even in the middle of non-native terrain
 ; "Unreachable"       = Unit can be attacked only by units explicitly listing this
 ;                       class in its 'targets', unless on a city or native base.
@@ -130,9 +134,6 @@ veteran_move_bonus = 0, 0, 0, 0
 ; "CollectRansom"     = Unit can collect ransom when killing lone barbarian leader
 ; "ZOC"               = Unit is subject to ZOC rules. Unit type flag "IgZOC" can
 ;                       override this
-; "CanFortify"        = Unit can fortify at land tiles. Unit type flag
-;                       "Cant_Fortify" can override this
-; "CanPillage"        = Unit can pillage tile infrastructure
 ; "DoesntOccupyTile"  = Even if this kind of enemy unit is on tile, cities can
 ;                       still work that tile
 ; "AttackNonNative"   = Unit can attack units on non-native tiles. Unit type
@@ -325,8 +326,6 @@ flags         = "Unreachable", "DoesntOccupyTile"
 ;                 less
 ; "OneAttack"	= can only make a single attack, regardless of movement points
 ; "FieldUnit"	= cause unhappiness even when not being aggressive
-; "BeachLander" = won't lose all its movement when moving from non-native
-;                 terrain to native terrain even if slow_invasions is on.
 ; "Settlers"	= can irrigate and build roads
 ; "Diplomat"	= can defend against diplomat actions (see diplchance
 ;                 server option)
@@ -336,7 +335,6 @@ flags         = "Unreachable", "DoesntOccupyTile"
 ;                 to regularly end turn on coast
 ; "Only_Native_Attack" = cannot attack targets on non-native tiles even if
 ;                 unit class can
-; "Cant_Fortify" =  cannot fortify even if unit class has "CanFortify" flag
 ; "Fanatic"	= can only be built by governments that allow them
 ;		  (see civ2/governments.ruleset, Fundamentalism government)
 ; "Unique"	= a player can only have one of these units in the game at
@@ -399,10 +397,6 @@ flags         = "Unreachable", "DoesntOccupyTile"
 ;  "Paradrop Unit"
 ;   paratroopers_range  = the maximal range the unit can be paradropped to.
 ;                         Max range is 65534.
-;   paratroopers_mr_req = the move rate which is required at least for
-;                         paradropping (whole movement points)
-;   paratroopers_mr_sub = the move rate which is subtracted after paradropping
-;                         (whole movement points)
 ;  "Upgrade Unit"
 ;   obsolete_by = the unit type upgraded to.
 ;  "Convert Unit"
@@ -806,7 +800,7 @@ uk_happy      = 1
 uk_shield     = 1
 uk_food       = 0
 uk_gold       = 0
-flags         = "IgTer", "IgZOC", "BorderPolice", "LightWeight"
+flags         = "IgTer", "IgZOC", "BorderPolice", "LightWeight", "SupplyLines"
 roles         = "DefendGood", "DefendGoodStartUnit", "Partisan", "BarbarianTech"
 helptext      = _("\
 Partisans are guerilla fighters who are experts\
@@ -846,7 +840,7 @@ uk_happy      = 1
 uk_shield     = 1
 uk_food       = 0
 uk_gold       = 0
-flags         = "IgTer", "BorderPolice", "LightWeight"
+flags         = "IgTer", "BorderPolice", "LightWeight", "SupplyLines"
 roles         = "DefendGood", "DefendGoodStartUnit"
 helptext      = _("\
 Alpine Troops are highly mobile units as well as\
@@ -910,7 +904,7 @@ uk_happy      = 1
 uk_shield     = 1
 uk_food       = 0
 uk_gold       = 0
-flags         = "Marines", "BorderPolice", "LightWeight"
+flags         = "Marines", "BorderPolice", "LightWeight", "SupplyLines"
 roles         = "DefendOk", "DefendOkStartUnit", "BarbarianSeaTech"
 helptext      = _("\
 Marines are infantry who are experts at marine warfare.\
@@ -941,7 +935,7 @@ uk_happy      = 1
 uk_shield     = 1
 uk_food       = 0
 uk_gold       = 0
-flags         = "Paratroopers", "BorderPolice", "LightWeight"
+flags         = "Paratroopers", "BorderPolice", "LightWeight", "SupplyLines"
 roles         = "DefendOk", "DefendOkStartUnit"
 helptext      = _("\
 Paratroopers are experts at airborne attacks. \
@@ -952,8 +946,6 @@ as Paratroopers landing on a tile occupied by enemy units are easy \
 targets!)\
 ")
 paratroopers_range = 10
-paratroopers_mr_req = 1
-paratroopers_mr_sub = 0
 
 [unit_mech_inf]
 name          = _("Mech. Inf.")
@@ -2142,7 +2134,7 @@ uk_shield     = 0
 uk_food       = 0
 uk_gold       = 0
 flags         = "Diplomat", "IgZOC", "NonMil", "HasNoZOC", "Spy",
-                "Expellable", "LightWeight", "Provoking"
+                "Expellable", "LightWeight", "Provoking", "SupplyLines"
 veteran_names =
 ; /* TRANS: Spy veteran level */
   _("?spy_level:informant"),
@@ -2351,9 +2343,14 @@ The Leader unit includes a court physician.\
  The Leader unit can therefore be used to heal it self or other\
  light weight land units.\
  Healing restores up to 25% of the target unit's hit points.\
- All the Leader's remaining movement points are spent.\
+ It costs one movement point for both the Leader and the patient.\
  The unit being healed must be allied or domestic.\
  It must be located at or adjacent to the Leader's tile.\
+"), _("\
+The Leader unit includes a royal sapper.\
+ Using it has a 50% chance of destroying a visible building in an enemy
+ city.\
+ Be careful! This ends the Leader's turn.\
 "), _("\
 Can be converted to a Leader Yacht by performing the 'Deploy' action\
  inside a city once Map Making has been discovered.\

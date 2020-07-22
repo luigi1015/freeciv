@@ -106,15 +106,22 @@ struct unit_node {
     TYPED_VECTOR_ITERATE(struct unit_node, list, elt)
 #define unit_node_vector_iterate_end  VECTOR_ITERATE_END
 
-enum { OVERVIEW_PAGE, MAP_PAGE, BUILDINGS_PAGE, WORKLIST_PAGE,
-  HAPPINESS_PAGE, CMA_PAGE, TRADE_PAGE, MISC_PAGE
+#define NUM_CITIZENS_SHOWN 30
+
+enum { OVERVIEW_PAGE, WORKLIST_PAGE, HAPPINESS_PAGE, CMA_PAGE,
+    SETTINGS_PAGE, STICKY_PAGE,
+  NUM_PAGES  /* the number of pages in city dialog notebook
+              * must match enries in misc_whichtab_label[] */
 };
 
-#define NUM_CITIZENS_SHOWN 30
-#define NUM_INFO_FIELDS 14      /* number of fields in city_info */
-#define NUM_PAGES 6             /* the number of pages in city dialog notebook 
-                                 * (+1) if you change this, you must add an
-                                 * entry to misc_whichtab_label[] */
+enum {
+    INFO_SIZE, INFO_FOOD, INFO_SHIELD, INFO_TRADE, INFO_GOLD,
+    INFO_LUXURY, INFO_SCIENCE, INFO_GRANARY, INFO_GROWTH,
+    INFO_CORRUPTION, INFO_WASTE, INFO_CULTURE, INFO_POLLUTION,
+    INFO_ILLNESS, INFO_STEAL, INFO_AIRLIFT,
+    NUM_INFO_FIELDS  /* number of fields in city_info
+                      * must match entries in output_label[] */
+};
 
 /* minimal size for the city map scrolling windows*/
 #define CITY_MAP_MIN_SIZE_X  200
@@ -639,10 +646,6 @@ static gboolean show_info_button_release(GtkWidget *w, GdkEventButton *ev,
   return FALSE;
 }
 
-enum { FIELD_FOOD, FIELD_SHIELD, FIELD_TRADE, FIELD_GOLD, FIELD_LUXURY,
-       FIELD_SCIENCE, FIELD_GRANARY, FIELD_GROWTH, FIELD_CORRUPTION,
-       FIELD_WASTE, FIELD_CULTURE, FIELD_POLLUTION, FIELD_ILLNESS
-};
 
 /**********************************************************************//**
   Popup info dialog
@@ -657,35 +660,38 @@ static gboolean show_info_popup(GtkWidget *w, GdkEventButton *ev,
     char buf[1024];
     
     switch (GPOINTER_TO_UINT(data)) {
-    case FIELD_FOOD:
+    case INFO_FOOD:
       get_city_dialog_output_text(pdialog->pcity, O_FOOD, buf, sizeof(buf));
       break;
-    case FIELD_SHIELD:
+    case INFO_SHIELD:
       get_city_dialog_output_text(pdialog->pcity, O_SHIELD,
 				  buf, sizeof(buf));
       break;
-    case FIELD_TRADE:
+    case INFO_TRADE:
       get_city_dialog_output_text(pdialog->pcity, O_TRADE, buf, sizeof(buf));
       break;
-    case FIELD_GOLD:
+    case INFO_GOLD:
       get_city_dialog_output_text(pdialog->pcity, O_GOLD, buf, sizeof(buf));
       break;
-    case FIELD_SCIENCE:
+    case INFO_SCIENCE:
       get_city_dialog_output_text(pdialog->pcity, O_SCIENCE,
 				  buf, sizeof(buf));
       break;
-    case FIELD_LUXURY:
+    case INFO_LUXURY:
       get_city_dialog_output_text(pdialog->pcity, O_LUXURY,
 				  buf, sizeof(buf));
       break;
-    case FIELD_CULTURE:
+    case INFO_CULTURE:
       get_city_dialog_culture_text(pdialog->pcity, buf, sizeof(buf));
       break;
-    case FIELD_POLLUTION:
+    case INFO_POLLUTION:
       get_city_dialog_pollution_text(pdialog->pcity, buf, sizeof(buf));
       break;
-    case FIELD_ILLNESS:
+    case INFO_ILLNESS:
       get_city_dialog_illness_text(pdialog->pcity, buf, sizeof(buf));
+      break;
+    case INFO_AIRLIFT:
+      get_city_dialog_airlift_text(pdialog->pcity, buf, sizeof(buf));
       break;
     default:
       return TRUE;
@@ -701,7 +707,7 @@ static gboolean show_info_popup(GtkWidget *w, GdkEventButton *ev,
     gtk_container_add(GTK_CONTAINER(p), frame);
 
     label = gtk_label_new(buf);
-    gtk_widget_set_name(label, "city_info_label");
+    gtk_widget_set_name(label, "city_label");
     gtk_widget_set_margin_left(label, 4);
     gtk_widget_set_margin_right(label, 4);
     gtk_widget_set_margin_top(label, 4);
@@ -731,7 +737,9 @@ static GtkWidget *create_city_info_table(struct city_dialog *pdialog,
   int i;
   GtkWidget *table, *label, *ebox;
 
-  static const char *output_label[NUM_INFO_FIELDS] = { N_("Food:"),
+  static const char *output_label[NUM_INFO_FIELDS] = {
+    N_("Size:"),
+    N_("Food:"),
     N_("Prod:"),
     N_("Trade:"),
     N_("Gold:"),
@@ -743,8 +751,9 @@ static GtkWidget *create_city_info_table(struct city_dialog *pdialog,
     N_("Waste:"),
     N_("Culture:"),
     N_("Pollution:"),
-    N_("Plague Risk:"),
-    N_("Tech Stolen:")
+    N_("Plague risk:"),
+    N_("Tech Stolen:"),
+    N_("Airlift:"),
   };
   static bool output_label_done;
 
@@ -756,14 +765,17 @@ static GtkWidget *create_city_info_table(struct city_dialog *pdialog,
   for (i = 0; i < NUM_INFO_FIELDS; i++) {
     label = gtk_label_new(output_label[i]);
     switch (i) {
-      case 2:
-      case 5:
-      case 7:
+    case INFO_SIZE:
+    case INFO_TRADE:
+    case INFO_SCIENCE:
+    case INFO_GROWTH:
         gtk_widget_set_margin_bottom(label, 5);
         break;
-      case 3:
-      case 6:
-      case 8:
+
+    case INFO_FOOD:
+    case INFO_GOLD:
+    case INFO_GRANARY:
+    case INFO_CORRUPTION:
         gtk_widget_set_margin_top(label, 5);
         break;
       default:
@@ -777,14 +789,15 @@ static GtkWidget *create_city_info_table(struct city_dialog *pdialog,
 
     ebox = gtk_event_box_new();
     switch (i) {
-      case 2:
-      case 5:
-      case 7:
+    case INFO_TRADE:
+    case INFO_SCIENCE:
+    case INFO_GROWTH:
         gtk_widget_set_margin_bottom(ebox, 5);
         break;
-      case 3:
-      case 6:
-      case 8:
+
+    case INFO_GOLD:
+    case INFO_GRANARY:
+    case INFO_CORRUPTION:
         gtk_widget_set_margin_top(ebox, 5);
         break;
       default:
@@ -1356,7 +1369,8 @@ static void create_and_append_settings_page(struct city_dialog *pdialog)
     N_("Gold")
   };
 
-  static const char *disband_label = N_("Disband if build settler at size 1");
+  static const char *disband_label
+    = N_("Allow unit production to disband city");
 
   static const char *misc_whichtab_label[NUM_PAGES] = {
     N_("Overview page"),
@@ -1449,7 +1463,7 @@ static void create_and_append_settings_page(struct city_dialog *pdialog)
 
   gtk_widget_set_sensitive(button, can_client_issue_orders());
   
-  /* the disband-if-size-1 button */
+  /* the disband-city-on-unit-production button */
   button = gtk_check_button_new_with_mnemonic(_(disband_label));
   pdialog->misc.disband_on_settler = button;
   gtk_container_add(GTK_CONTAINER(vbox2), button);
@@ -1742,6 +1756,9 @@ static void city_dialog_update_citizens(struct city_dialog *pdialog)
     cairo_rectangle(cr, i * width, 0, width, citizen_bar_height);
     cairo_fill(cr);
   }
+  cairo_rectangle(cr, i * width, 0, width * (NUM_CITIZENS_SHOWN - i), citizen_bar_height);
+  cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
+  cairo_fill(cr);
 
   cairo_destroy(cr);
 
@@ -1759,68 +1776,73 @@ static void city_dialog_update_information(GtkWidget **info_ebox,
   char buf[NUM_INFO_FIELDS][512];
   struct city *pcity = pdialog->pcity;
   int granaryturns;
+  int non_workers = city_specialists(pcity);
   GdkRGBA red = {1.0, 0, 0, 1.0};
   GdkRGBA *color;
 
-  enum { FOOD, SHIELD, TRADE, GOLD, LUXURY, SCIENCE,
-         GRANARY, GROWTH, CORRUPTION, WASTE, CULTURE,
-         POLLUTION, ILLNESS, STEAL
-  };
 
   /* fill the buffers with the necessary info */
-  fc_snprintf(buf[FOOD], sizeof(buf[FOOD]), "%3d (%+4d)",
+  if (non_workers) {
+	  fc_snprintf(buf[INFO_SIZE], sizeof(buf[INFO_SIZE]), "%3d (%3d)",
+				  pcity->size, non_workers);
+  } else {
+	  fc_snprintf(buf[INFO_SIZE], sizeof(buf[INFO_SIZE]), "%3d", pcity->size);
+  }
+  fc_snprintf(buf[INFO_FOOD], sizeof(buf[INFO_FOOD]), "%3d (%+4d)",
               pcity->prod[O_FOOD], pcity->surplus[O_FOOD]);
-  fc_snprintf(buf[SHIELD], sizeof(buf[SHIELD]), "%3d (%+4d)",
+  fc_snprintf(buf[INFO_SHIELD], sizeof(buf[INFO_SHIELD]), "%3d (%+4d)",
               pcity->prod[O_SHIELD] + pcity->waste[O_SHIELD],
               pcity->surplus[O_SHIELD]);
-  fc_snprintf(buf[TRADE], sizeof(buf[TRADE]), "%3d (%+4d)",
+  fc_snprintf(buf[INFO_TRADE], sizeof(buf[INFO_TRADE]), "%3d (%+4d)",
               pcity->surplus[O_TRADE] + pcity->waste[O_TRADE],
               pcity->surplus[O_TRADE]);
-  fc_snprintf(buf[GOLD], sizeof(buf[GOLD]), "%3d (%+4d)",
+  fc_snprintf(buf[INFO_GOLD], sizeof(buf[INFO_GOLD]), "%3d (%+4d)",
               pcity->prod[O_GOLD], pcity->surplus[O_GOLD]);
-  fc_snprintf(buf[LUXURY], sizeof(buf[LUXURY]), "%3d",
+  fc_snprintf(buf[INFO_LUXURY], sizeof(buf[INFO_LUXURY]), "%3d",
               pcity->prod[O_LUXURY]);
-  fc_snprintf(buf[SCIENCE], sizeof(buf[SCIENCE]), "%3d",
+  fc_snprintf(buf[INFO_SCIENCE], sizeof(buf[INFO_SCIENCE]), "%3d",
               pcity->prod[O_SCIENCE]);
-  fc_snprintf(buf[GRANARY], sizeof(buf[GRANARY]), "%4d/%-4d",
+  fc_snprintf(buf[INFO_GRANARY], sizeof(buf[INFO_GRANARY]), "%4d/%-4d",
               pcity->food_stock, city_granary_size(city_size_get(pcity)));
 
   granaryturns = city_turns_to_grow(pcity);
   if (granaryturns == 0) {
     /* TRANS: city growth is blocked.  Keep short. */
-    fc_snprintf(buf[GROWTH], sizeof(buf[GROWTH]), _("blocked"));
+    fc_snprintf(buf[INFO_GROWTH], sizeof(buf[INFO_GROWTH]), _("blocked"));
   } else if (granaryturns == FC_INFINITY) {
     /* TRANS: city is not growing.  Keep short. */
-    fc_snprintf(buf[GROWTH], sizeof(buf[GROWTH]), _("never"));
+    fc_snprintf(buf[INFO_GROWTH], sizeof(buf[INFO_GROWTH]), _("never"));
   } else {
     /* A negative value means we'll have famine in that many turns.
        But that's handled down below. */
     /* TRANS: city growth turns.  Keep short. */
-    fc_snprintf(buf[GROWTH], sizeof(buf[GROWTH]),
+    fc_snprintf(buf[INFO_GROWTH], sizeof(buf[INFO_GROWTH]),
                 PL_("%d turn", "%d turns", abs(granaryturns)),
                 abs(granaryturns));
   }
-  fc_snprintf(buf[CORRUPTION], sizeof(buf[CORRUPTION]), "%4d",
+  fc_snprintf(buf[INFO_CORRUPTION], sizeof(buf[INFO_CORRUPTION]), "%4d",
               pcity->waste[O_TRADE]);
-  fc_snprintf(buf[WASTE], sizeof(buf[WASTE]), "%4d",
+  fc_snprintf(buf[INFO_WASTE], sizeof(buf[INFO_WASTE]), "%4d",
               pcity->waste[O_SHIELD]);
-  fc_snprintf(buf[CULTURE], sizeof(buf[CULTURE]), "%4d",
+  fc_snprintf(buf[INFO_CULTURE], sizeof(buf[INFO_CULTURE]), "%4d",
               pcity->client.culture);
-  fc_snprintf(buf[POLLUTION], sizeof(buf[POLLUTION]), "%4d",
+  fc_snprintf(buf[INFO_POLLUTION], sizeof(buf[INFO_POLLUTION]), "%4d",
               pcity->pollution);
   if (!game.info.illness_on) {
-    fc_snprintf(buf[ILLNESS], sizeof(buf[ILLNESS]), " -.-");
+    fc_snprintf(buf[INFO_ILLNESS], sizeof(buf[INFO_ILLNESS]), " -.-");
   } else {
     illness = city_illness_calc(pcity, NULL, NULL, NULL, NULL);
     /* illness is in tenth of percent */
-    fc_snprintf(buf[ILLNESS], sizeof(buf[ILLNESS]), "%4.1f",
+    fc_snprintf(buf[INFO_ILLNESS], sizeof(buf[INFO_ILLNESS]), "%4.1f%%",
                 (float)illness / 10.0);
   }
   if (pcity->steal) {
-    fc_snprintf(buf[STEAL], sizeof(buf[STEAL]), _("%d times"), pcity->steal);
+    fc_snprintf(buf[INFO_STEAL], sizeof(buf[INFO_STEAL]), _("%d times"), pcity->steal);
   } else {
-    fc_snprintf(buf[STEAL], sizeof(buf[STEAL]), _("Not stolen"));
+    fc_snprintf(buf[INFO_STEAL], sizeof(buf[INFO_STEAL]), _("Not stolen"));
   }
+
+  get_city_dialog_airlift_value(pcity, buf[INFO_AIRLIFT], sizeof(buf[INFO_AIRLIFT]));
 
   /* stick 'em in the labels */
   for (i = 0; i < NUM_INFO_FIELDS; i++) {
@@ -1828,23 +1850,24 @@ static void city_dialog_update_information(GtkWidget **info_ebox,
   }
 
   /* 
-   * Special style stuff for granary, growth and pollution below. The
-   * "4" below is arbitrary. 3 turns should be enough of a warning.
+   * Special style stuff for granary, growth, pollution, and plague below.
+   * For starvation, the "4" below is arbitrary. 3 turns should be enough
+   * of a warning.
    */
   color = (granaryturns > -4 && granaryturns < 0) ? &red : NULL;
-  gtk_widget_override_color(info_label[GRANARY], GTK_STATE_FLAG_NORMAL, color);
+  gtk_widget_override_color(info_label[INFO_GRANARY], GTK_STATE_FLAG_NORMAL, color);
 
   color = (granaryturns == 0 || pcity->surplus[O_FOOD] < 0) ? &red : NULL;
-  gtk_widget_override_color(info_label[GROWTH], GTK_STATE_FLAG_NORMAL, color);
+  gtk_widget_override_color(info_label[INFO_GROWTH], GTK_STATE_FLAG_NORMAL, color);
 
   /* someone could add the color &orange for better granularity here */
 
   color = (pcity->pollution >= 10) ? &red : NULL;
-  gtk_widget_override_color(info_label[POLLUTION], GTK_STATE_FLAG_NORMAL, color);
+  gtk_widget_override_color(info_label[INFO_POLLUTION], GTK_STATE_FLAG_NORMAL, color);
 
-  /* illness is in tenth of percent, i.e 100 != 10.0% */
+  /* illness is in tenth of percent, i.e 100 == 10.0% */
   color = (illness >= 100) ? &red : NULL;
-  gtk_widget_override_color(info_label[ILLNESS], GTK_STATE_FLAG_NORMAL, color);
+  gtk_widget_override_color(info_label[INFO_ILLNESS], GTK_STATE_FLAG_NORMAL, color);
 }
 
 /**********************************************************************//**
@@ -1968,7 +1991,7 @@ static void city_dialog_update_building(struct city_dialog *pdialog)
 
     for (item = 0; item < targets_used; item++) {
       if (can_city_build_now(pcity, &items[item].item)) {
-        const char* name;
+        const char *name;
         struct sprite* sprite;
         GdkPixbuf *pix;
         struct universal target = items[item].item;
@@ -2901,17 +2924,19 @@ static void popup_workertask_dlg(struct city *pcity, struct tile *ptile)
     }
 
     if ((pterr->mining_result == pterr
-         && univs_have_action_enabler(ACTION_MINE, NULL, &for_terr))
+         && action_id_univs_not_blocking(ACTION_MINE, NULL, &for_terr))
         || (pterr->mining_result != pterr && pterr->mining_result != NULL
-            && univs_have_action_enabler(ACTION_PLANT, NULL, &for_terr))) {
+            && action_id_univs_not_blocking(ACTION_PLANT,
+                                            NULL, &for_terr))) {
       choice_dialog_add(shl, _("Mine"),
                         G_CALLBACK(set_city_workertask),
                         GINT_TO_POINTER(ACTIVITY_MINE), FALSE, NULL);
     }
     if ((pterr->irrigation_result == pterr
-         && univs_have_action_enabler(ACTION_IRRIGATE, NULL, &for_terr))
+         && action_id_univs_not_blocking(ACTION_IRRIGATE, NULL, &for_terr))
         || (pterr->irrigation_result != pterr && pterr->irrigation_result != NULL
-            && univs_have_action_enabler(ACTION_CULTIVATE, NULL, &for_terr))) {
+            && action_id_univs_not_blocking(ACTION_CULTIVATE,
+                                            NULL, &for_terr))) {
       choice_dialog_add(shl, _("Irrigate"),
                         G_CALLBACK(set_city_workertask),
                         GINT_TO_POINTER(ACTIVITY_IRRIGATE), FALSE, NULL);
@@ -2922,7 +2947,8 @@ static void popup_workertask_dlg(struct city *pcity, struct tile *ptile)
                         GINT_TO_POINTER(ACTIVITY_GEN_ROAD), FALSE, NULL);
     }
     if (pterr->transform_result != pterr && pterr->transform_result != NULL
-        && univs_have_action_enabler(ACTION_TRANSFORM_TERRAIN, NULL, &for_terr)) {
+        && action_id_univs_not_blocking(ACTION_TRANSFORM_TERRAIN,
+                                        NULL, &for_terr)) {
       choice_dialog_add(shl, _("Transform"),
                         G_CALLBACK(set_city_workertask),
                         GINT_TO_POINTER(ACTIVITY_TRANSFORM), FALSE, NULL);

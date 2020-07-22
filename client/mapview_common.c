@@ -382,7 +382,7 @@ static bool nuke_animation(struct animation *anim, double time_gone)
   if (time_gone > 1.0) {
     update_map_canvas_visible();
 
-    return FALSE;
+    return TRUE;
   }
 
   return FALSE;
@@ -911,6 +911,7 @@ static void base_set_mapview_origin(float gui_x0, float gui_y0)
   case HOVER_PATROL:
   case HOVER_CONNECT:
     create_line_at_mouse_pos();
+  case HOVER_GOTO_SEL_TGT:
   case HOVER_NONE:
   case HOVER_PARADROP:
   case HOVER_ACT_SEL_TGT:
@@ -3391,7 +3392,7 @@ void mapdeco_add_gotoline(const struct tile *ptile, enum direction8 dir)
   bool changed;
 
   if (!mapdeco_gotoline_table || !ptile
-      || !(0 <= dir && dir <= direction8_max())) {
+      || !(dir <= direction8_max())) {
     return;
   }
   ptile_dest = mapstep(&(wld.map), ptile, dir);
@@ -3425,7 +3426,7 @@ void mapdeco_remove_gotoline(const struct tile *ptile,
   bool changed = FALSE;
 
   if (!mapdeco_gotoline_table || !ptile
-      || !(0 <= dir && dir <= direction8_max())) {
+      || !(dir <= direction8_max())) {
     return;
   }
 
@@ -3494,7 +3495,7 @@ bool mapdeco_is_gotoline_set(const struct tile *ptile,
 {
   struct gotoline_counter *pglc;
 
-  if (!ptile || !(0 <= dir && dir <= direction8_max())
+  if (!ptile || !(dir <= direction8_max())
       || !mapdeco_gotoline_table) {
     return FALSE;
   }

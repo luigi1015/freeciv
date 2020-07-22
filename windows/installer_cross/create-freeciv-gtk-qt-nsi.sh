@@ -1,6 +1,17 @@
 #!/bin/sh
 
-# ./create-freeciv-gtk-qt-nsi.sh <Freeciv files directory> <version> <gtk2|gtk3|qt> <GTK+2|GTK+3|Qt> <win32|win64|win>
+# ./create-freeciv-gtk-qt-nsi.sh <Freeciv files directory> <version> <gtk3|qt> <GTK+3|Qt> <win32|win64|win> [mp gui] [unistall setup script]
+
+if test "x$6" != "x" ; then
+  MPGUI_ID="$6"
+else
+  MPGUI_ID="$3"
+fi
+
+if test "x$7" != "x" && ! test -x "$7" ; then
+  echo "$7 not an executable script" >&2
+  exit 1
+fi
 
 cat <<EOF
 ; Freeciv Windows installer script
@@ -12,6 +23,7 @@ SetCompressor /SOLID lzma
 !define APPNAME "Freeciv"
 !define VERSION $2
 !define GUI_ID $3
+!define MPGUI_ID $MPGUI_ID
 !define GUI_NAME $4
 !define WIN_ARCH $5
 !define APPID "\${APPNAME}-\${VERSION}-\${GUI_ID}"
@@ -110,7 +122,7 @@ cat <<EOF
   CreateDirectory "\$SMPROGRAMS\\\$STARTMENU_FOLDER"
   CreateShortCut "\$SMPROGRAMS\\\$STARTMENU_FOLDER\Freeciv.lnk" "\$INSTDIR\freeciv-\${GUI_ID}.cmd" "\$DefaultLanguageCode" "\$INSTDIR\freeciv-\${GUI_ID}.exe" 0 SW_SHOWMINIMIZED
   CreateShortCut "\$SMPROGRAMS\\\$STARTMENU_FOLDER\Freeciv Server.lnk" "\$INSTDIR\freeciv-server.cmd" "\$DefaultLanguageCode" "\$INSTDIR\freeciv-server.exe" 0 SW_SHOWMINIMIZED
-  CreateShortCut "\$SMPROGRAMS\\\$STARTMENU_FOLDER\Freeciv Modpack Installer.lnk" "\$INSTDIR\freeciv-mp-\${GUI_ID}.cmd" "\$DefaultLanguageCode" "\$INSTDIR\freeciv-mp-\${GUI_ID}.exe" 0 SW_SHOWMINIMIZED
+  CreateShortCut "\$SMPROGRAMS\\\$STARTMENU_FOLDER\Freeciv Modpack Installer.lnk" "\$INSTDIR\freeciv-mp-\${MPGUI_ID}.cmd" "\$DefaultLanguageCode" "\$INSTDIR\freeciv-mp-\${MPGUI_ID}.exe" 0 SW_SHOWMINIMIZED
 EOF
 
 if test "x$3" = "xqt" ; then
@@ -119,6 +131,7 @@ fi
 
 cat <<EOF
 
+  CreateShortCut "\$SMPROGRAMS\\\$STARTMENU_FOLDER\Documentation.lnk" "\$INSTDIR\doc\freeciv"
   CreateShortCut "\$SMPROGRAMS\\\$STARTMENU_FOLDER\Uninstall.lnk" "\$INSTDIR\uninstall.exe"
   CreateShortCut "\$SMPROGRAMS\\\$STARTMENU_FOLDER\Website.lnk" "\$INSTDIR\Freeciv.url"
   !insertmacro MUI_STARTMENU_WRITE_END
@@ -293,6 +306,14 @@ do
 echo "  Delete \"\$INSTDIR$name\"" | sed 's,/,\\,g'
 done
 
+find $1 -type l |
+grep -v '/$' |
+sed 's|[^/]*||' |
+while read -r name
+do
+echo "  Delete \"\$INSTDIR$name\"" | sed 's,/,\\,g'
+done
+
 find $1 -depth -type d |
 grep -v '/$' |
 sed 's|[^/]*||' |
@@ -300,6 +321,10 @@ while read -r name
 do
 echo "  RMDir \"\$INSTDIR$name\"" | sed 's,/,\\,g'
 done
+
+if test "x$7" != "x" ; then
+  $7
+fi
 
 cat <<EOF
 

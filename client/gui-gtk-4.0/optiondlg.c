@@ -333,9 +333,9 @@ static void option_color_select_callback(GtkButton *button, gpointer data)
 
   dialog = gtk_dialog_new_with_buttons(_("Select a color"), NULL,
                                        GTK_DIALOG_MODAL,
-                                       _("Cancel"), GTK_RESPONSE_CANCEL,
-                                       _("Clear"), GTK_RESPONSE_REJECT,
-                                       _("OK"), GTK_RESPONSE_OK, NULL);
+                                       _("_Cancel"), GTK_RESPONSE_CANCEL,
+                                       _("C_lear"), GTK_RESPONSE_REJECT,
+                                       _("_OK"), GTK_RESPONSE_OK, NULL);
   setup_dialog(dialog, toplevel);
   g_signal_connect(dialog, "response",
                    G_CALLBACK(color_selector_response_callback), button);
@@ -363,12 +363,12 @@ option_dialog_new(const char *name, const struct option_set *poptset)
   pdialog = fc_malloc(sizeof(*pdialog));
   pdialog->poptset = poptset;
   pdialog->shell = gtk_dialog_new_with_buttons(name, NULL, 0,
-                                               _("Cancel"), RESPONSE_CANCEL,
-                                               _("Save"), RESPONSE_SAVE,
-                                               _("Refresh"), RESPONSE_REFRESH,
+                                               _("_Cancel"), RESPONSE_CANCEL,
+                                               _("_Save"), RESPONSE_SAVE,
+                                               _("_Refresh"), RESPONSE_REFRESH,
                                                _("Reset"), RESPONSE_RESET,
-                                               _("Apply"), RESPONSE_APPLY,
-                                               _("OK"), RESPONSE_OK, NULL);
+                                               _("_Apply"), RESPONSE_APPLY,
+                                               _("_OK"), RESPONSE_OK, NULL);
   pdialog->notebook = gtk_notebook_new();
   pdialog->vboxes = fc_calloc(CATEGORY_NUM, sizeof(*pdialog->vboxes));
   pdialog->box_children = fc_calloc(CATEGORY_NUM,
@@ -711,10 +711,11 @@ static inline void option_dialog_option_str_set(struct option *poption,
                                                 const char *string)
 {
   if (NULL != option_str_values(poption)) {
-    gtk_entry_set_text(GTK_ENTRY(gtk_bin_get_child(GTK_BIN
-                       (option_get_gui_data(poption)))), string);
+    gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(gtk_bin_get_child(GTK_BIN
+                                          (option_get_gui_data(poption))))), string, -1);
   } else {
-    gtk_entry_set_text(GTK_ENTRY(option_get_gui_data(poption)), string);
+    gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(option_get_gui_data(poption))),
+                              string, -1);
   }
 }
 
@@ -896,10 +897,12 @@ static void option_dialog_option_apply(struct option *poption)
 
   case OT_STRING:
     if (NULL != option_str_values(poption)) {
-      (void) option_str_set(poption, gtk_entry_get_text
-                            (GTK_ENTRY(gtk_bin_get_child(GTK_BIN(w)))));
+      (void) option_str_set(poption, gtk_entry_buffer_get_text(
+                                        gtk_entry_get_buffer(
+                                           GTK_ENTRY(gtk_bin_get_child(GTK_BIN(w))))));
     } else {
-      (void) option_str_set(poption, gtk_entry_get_text(GTK_ENTRY(w)));
+      (void) option_str_set(poption, gtk_entry_buffer_get_text(
+                                                 gtk_entry_get_buffer(GTK_ENTRY(w))));
     }
     break;
 

@@ -41,7 +41,7 @@ class QTabWidget;
 class QVariant;
 class QVBoxLayout;
 
-#define NUM_INFO_FIELDS 14
+#define NUM_INFO_FIELDS 15
 
 // common
 #include "unittype.h"
@@ -61,10 +61,10 @@ class QVBoxLayout;
 class QImage;
 
 QString get_tooltip(QVariant qvar);
-QString get_tooltip_improvement(impr_type *building,
+QString get_tooltip_improvement(const impr_type *building,
                                 struct city *pcity = nullptr,
                                 bool ext = false);
-QString get_tooltip_unit(struct unit_type *unit, bool ext = false);
+QString get_tooltip_unit(const struct unit_type *utype, bool ext = false);
 QString bold(QString text);
 
 class fc_tooltip : public QObject
@@ -192,12 +192,12 @@ class impr_item: public QLabel
   Q_OBJECT
 
 public:
-  impr_item(QWidget *parent ,struct impr_type *building, struct city *pcity);
+  impr_item(QWidget *parent, const struct impr_type *building, struct city *pcity);
   ~impr_item();
   void init_pix();
 
 private:
-  struct impr_type *impr;
+  const struct impr_type *impr;
   struct canvas *impr_pixmap;
   struct city *pcity;
 
@@ -502,7 +502,7 @@ private slots:
   void worklist_down();
   void worklist_del();
   void display_worklist_menu(const QPoint &p);
-  void disband_state_changed(int state);
+  void disband_state_changed(bool allow_disband);
   void cma_slider(int val);
   void cma_celebrate_changed(int val);
   void cma_remove();

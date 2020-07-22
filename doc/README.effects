@@ -83,14 +83,17 @@ Age (of city):   City
 Age (of player): Player
 MinSize:         Traderoute, City
 MinCulture:      World, Alliance, Team, Player, Traderoute, City
+MinForeignPct:   Traderoute, City
 AI:              Player
 MaxUnitsOnTile:  Local, Adjacent, CAdjacent
 TerrainClass:    Local, Adjacent, CAdjacent, Traderoute, City
 TerrainFlag:     Local, Adjacent, CAdjacent, Traderoute, City
 TerrainAlter:    Local
 CityTile:        Local, Adjacent, CAdjacent
+CityStatus:      Traderoute, City
 Style:           Player
 UnitState:       Local
+Activity:        Local
 MinMoveFrags:    Local
 MinVeteran:      Local
 MinHitPoints:    Local
@@ -100,13 +103,19 @@ MinSize is the minimum size of a city required.
 AI is ai player difficulty level.
 TerrainClass is either "Land" or "Oceanic".
 CityTile is either "Center" (city center) or "Claimed" (owned).
+CityStatus is "OwnedByOriginal"
 DiplRel is a diplomatic relationship.
 MaxUnitsOnTile is about the number of units present on a tile.
 UnitState is "Transported", "Transporting", "OnNativeTile", "OnLivableTile",
-"OnDomesticTile" or "HasHomeCity".
-MinMoveFargs is the minimum move fragments the unit must have left.
+"InNativeExtra", "OnDomesticTile", "MovedThisTurn" or "HasHomeCity".
+Activity is "Idle", "Pollution", "Mine", "Irrigate", "Fortified", "Fortress", "Sentry",
+"Pillage", "Goto", "Explore", "Transform", "Fortifying", "Fallout", "Base", "Road",
+"Convert", "Cultivate", or "Plant".
+MinMoveFrags is the minimum move fragments the unit must have left.
 MinCalFrag is the minimum sub-year division the calendar must have reached,
 if enabled (see [calendar].fragments in game.ruleset).
+Nationality is fulfilled by any citizens of the given nationality
+present in the city.
 ServerSetting is if a Boolean server setting is enabled. The setting must be
 visible to all players and affect the game rules.
 
@@ -114,12 +123,18 @@ Effect types
 ============
 
 Tech_Parasite
-    Gain any advance known already by amount number of other players. Note 
-that if you have two such effects, they combine into one much worse effect 
-(the number of players required to gain an advance is increased).
+    Gain any advance known already by amount number of other teams,
+if team_pooled_research is enabled, or amount number of other players
+otherwise. Note that if you have two such effects, they combine into
+one much worse effect (the number of players required to gain an advance
+is increased).
 
 Airlift
-    Allow airlift to/from a city.
+    Allow airlift to/from a city. The value tells how many units per
+    turn can be airlifted, unless server setting 'airlifttingstyle' sets
+    the number unlimited for either source or destination city. If airlifts
+    are set to unlimited, they are enabled by any positive value of this
+    effect.
 
 Any_Government
     Allow changing to any form of government regardless of tech prerequisites.
@@ -264,9 +279,39 @@ Thiefs_Share_Pm
 "Steal Gold Escape" actions that is lost before it reaches the player
 ordering it. Evaluated against the actor unit.
 
+Maps_Stolen_Pct
+    The probability (in percent) that the map of a tile is stolen in the
+actions "Steal Maps" and "Steal Maps Escape".
+DiplRel reqs are unit owner to city owner.
+Requirements evaluated against tile or city not supported.
+Default value: 100%
+
 Illegal_Action_Move_Cost
     The number of move fragments lost when the player tries to do an action
-that turns out to be illegal.
+that turns out to be illegal. Only applied when the player wasn't aware that
+the action was illegal and its illegality therefore reveals new information.
+
+Illegal_Action_HP_Cost
+    The number of hit points lost when the player tries to do an action
+that turns out to be illegal. Only applied when the player wasn't aware that
+the action was illegal and its illegality therefore reveals new information.
+Can kill the unit.
+If the action always causes the actor unit to end up at the target tile two
+consolation prizes are given. An area with the radius of the actor unit's
+vision_radius_sq tiles is revealed. The player may also get contact with the
+owners of units and cites adjacent to the target tile.
+
+Action_Success_Actor_Move_Cost
+    The number of move fragments lost when a unit successfully performs an
+action. Evaluated and done after the action is successfully completed. Added
+on top of any movement fragments the action itself subtracts.
+
+Action_Success_Target_Move_Cost
+    The number of move fragments subtracted from a unit when someone
+successfully performs an action on it. Evaluated and done after the action
+is successfully completed. Added on top of any movement fragments the
+action itself subtracts. Only supported for actions that targets an
+individual unit. (See doc/README.actions)
 
 Casus_Belli_Caught
     Checked when a player is caught trying to do an action. Will cause an
@@ -282,17 +327,28 @@ incident gives the intended victim a casus belli against the actor player.
 A value of 1000 or higher is international outrage. International outrage
 gives every other player a casus belli against the actor.
 
+Casus_Belli_Complete
+    Checked when a player completes an action that takes several turns
+against another player. Will cause an incident with the intended victim
+player if the value is 1 or higher. The incident gives the intended victim
+a casus belli against the actor player. A value of 1000 or higher is
+international outrage. International outrage gives every other player a
+casus belli against the actor.
+Only "Pillage" is currently supported.
+
 Action_Odds_Pct
     Modifies the odds of an action being successful. Some actions have a
-    risk: the actor may get caught before he can perform it. This effect
-    modifies the actor's odds. A positive value helps him. A negative value
-    makes it more probable that he will get caught. Currently supports the
-    actions "Incite City", "Incite City Escape", "Steal Gold",
-    "Steal Gold Escape", "Steal Maps", "Steal Maps Escape", "Suitcase Nuke",
-    "Suitcase Nuke Escape", "Sabotage City", "Sabotage City Escape",
-    "Targeted Sabotage City", "Targeted Sabotage City Escape",
-    "Steal Tech", "Steal Tech Escape Expected", "Targeted Steal Tech" and
-    "Targeted Steal Tech Escape Expected".
+risk: the actor may get caught before he can perform it. This effect
+modifies the actor's odds. A positive value helps him. A negative value
+makes it more probable that he will get caught. Currently supports the
+actions "Incite City", "Incite City Escape", "Steal Gold",
+"Steal Gold Escape", "Steal Maps", "Steal Maps Escape", "Suitcase Nuke",
+"Suitcase Nuke Escape", "Sabotage City", "Sabotage City Escape",
+"Targeted Sabotage City", "Targeted Sabotage City Escape",
+"Sabotage City Production", "Sabotage City Production Escape",
+"Surgical Strike Building", "Surgical Strike Production",
+"Steal Tech", "Steal Tech Escape Expected", "Targeted Steal Tech",
+"Targeted Steal Tech Escape Expected" and "Spread Plague".
 
 Size_Adj
     Increase maximum size of a city by amount.
@@ -384,6 +440,11 @@ Defend_Bonus
 Attack_Bonus
     Increases offensive bonuses of units. Unit requirements on this effect are
     the attacking unit itself.
+
+Fortify_Defense_Bonus
+    Percentage defense bonus multiplicative with Defend_Bonus, usually given
+    to fortified units. Unit requirements on this effect are the defending unit
+    itself.
 
 Gain_AI_Love
     Gain amount points of "AI love" with AI(s).
@@ -507,6 +568,13 @@ Upgrade_Price_Pct
     player level. You cannot adjust upgrade costs for certain unit type or
     for units upgraded in certain city.
 
+Unit_Shield_Value_Pct
+    Increase the unit's value in shields by amount percent. When this effect
+is used to determine how many shields the player gets for the actions
+"Recycle Unit" and "Help Wonder" it gets access to unit state. When it is
+used to influence the gold cost of "Upgrade Unit" it only has access to unit
+type.
+
 Retire_Pct
     The chance that unit gets retired (removed) when turn changes.
     Retirement only happens if there are no enemy units or cities within
@@ -572,6 +640,10 @@ National_History
     Value is how much history type (cumulative) culture, not tied to any any
     specific city, nation produces.
 
+Infra_Points
+    City increases owner's infra points by value each turn. If overall points
+    are negative after all cities have been processed, they are set to 0.
+
 
 Details about requirement types
 ===============================
@@ -629,5 +701,8 @@ The UnitState requirement type
                and safe tiles.
 "OnLivableTile" is fulfilled if the unit is on a tile where it can exist
                 outside of a transport.
+"InNativeExtra" is fulfilled if the unit is on a tile with an extra native
+                to it.
 "OnDomesticTile" is fulfilled if the unit is on a tile owned by its player.
+"MovedThisTurn" is fulfilled if the unit has moved this turn.
 "HasHomeCity" is fulfilled if the unit has a home city.

@@ -16,14 +16,15 @@ options="+Freeciv-ruleset-Devel-2017.Jan.02"
 format_version=20
 
 [control]
-; Names for custom terrain flags. There can be up to 8 of these.
+; Names for custom terrain flags. There can be up to 10 of these.
 ; name          = rule name; In some circumstances user may see this
 ;                 as part of some sentences, so try to make it descriptive
 ;                 and sensible.
 ; helptxt       = displayed in the help for terrains with this flag (optional)
-;flags =
-;  { "name", "helptxt"
-;  }
+flags =
+  { "name", "helptxt"
+     _("NoFortify"), _("No units can fortify on this terrain.")
+  }
 
 ; Names for custom extra flags. There can be up to 8 of these.
 ; name          = rule name; In some circumstances user may see this
@@ -134,6 +135,10 @@ igter_cost = 1
 ;                        terrain rule_name -- transformation changes to that
 ;                          terrain
 ; transform_time       = time to transform; if 0, cannot transform
+; placing_time         = time for 'placing' an extra; if 0, cannot place
+;                        Nonzero values only affect extras with build_time 0.
+;                        Such extras can modify time with build_time_factor.
+;                        Default is 1.
 ; pillage_time         = time to pillage extra from the tile (0 = impossible)
 ;                        Nonzero values only affect extras with removal_time 0.
 ; clean_pollution_time = time for 'clean pollution' activity (0 = impossible)
@@ -172,7 +177,6 @@ igter_cost = 1
 ;                        (lua scripting)
 ;   - NoZoc            = Units on this terrain are not generating or subject
 ;                        to zoc
-;   - NoFortify        = Units cannot fortify on this terrain
 ;   - Frozen           = Frozen/polar terrain. For water tiles, Frozen terrain
 ;                        is generated near poles. Conversion between frozen
 ;                        and unfrozen terrain can be controlled with
@@ -777,7 +781,7 @@ ui_name_base_airbase = _("?gui_type:Build None")
 ;                           "CleanPollution", "CleanFallout", "Pillage",
 ;                           "Disappear", or "Enter"
 ; infracost               = Number of infrapoints it costs to place this
-;                           extra. 0 means extra cannot be placed. Default is 1
+;                           extra. 0, the default, means extra cannot be placed.
 ; graphic                 = tag specifying preferred graphic
 ; graphic_alt             = tag for alternate graphic if preferred graphic is
 ;                           not present. Can use eg "-" for no alternate
@@ -961,8 +965,8 @@ Pollution from production is likely to start becoming important as \
 your civilization becomes more industrialized, giving you buildings \
 such as Factory and Power Plant which boost production. Replacing a \
 Power Plant with cleaner forms of energy -- a Hydro Plant / Hoover \
-Dam, Nuclear Plant, or Solar Plant -- will reduce pollution from \
-production, as will a Recycling Center.\
+Dam or Nuclear Plant -- will reduce pollution from production, as \
+will a Recycling Center.\
 "), _("\
 The city's population starts adding to pollution with the discovery of \
 Industrialization, and Automobile, Mass Production, and Plastics make \
@@ -1111,9 +1115,9 @@ Once you learn the Railroad technology, you may upgrade your roads\
  to railroads. Units expend no movement points when moving along a\
  railroad; you may ride a railroad indefinitely. (As may your enemies!)\
 "), _("\
-A railroad also increases by half (rounding down) all resources produced\
- by a tile. A tile whose road is upgraded to a railroad retains any trade\
- bonus from the road as well.\
+A railroad also increases by half (rounding down) all kinds of resources\
+ produced by a tile. A tile whose road is upgraded to a railroad retains\
+ any trade bonus from the road as well.\
 ")
 
 [extra_river]
@@ -1132,7 +1136,7 @@ buildable      = FALSE
 native_to      = "Land"
 flags          = "NaturalDefense"
 helptext       = _("\
-Grassland tile may have a River on it.\
+A grassland tile may have a River on it.\
 "), _("\
 Roads and railroads can only be built on River tiles if your\
  civilization has learned Bridge Building technology.\

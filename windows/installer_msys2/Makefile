@@ -39,19 +39,11 @@ DLLPATH_PREFIX=/$(ARCHDIR)/bin/
 # Make rules
 #
 
-# by default build all installers that are buildable with current msys2 environment
+# by default build all installers.
 all: gtk3.22-installer sdl2-installer ruledit-installer qt-installer
 
 gtk3.22-installer:
 	make GUI=gtk3.22 FCMP=gtk3 EXTRA_CONFIG="--disable-ruledit $(EXTRA_CONFIG)" wrap-gtk3.22
-
-# These are what can be built in current official environment version
-buildable-win32: gtk3.22-installer sdl2-installer ruledit-installer qt-installer
-
-buildable-win64: gtk3.22-installer sdl2-installer ruledit-installer qt-installer
-
-# See comments on 'snapshot' target why this wrapping is needed
-buildable: buildable-$(WINARCH)
 
 sdl2-installer:
 	make GUI=sdl2 FCMP=gtk3 EXTRA_CONFIG="--disable-ruledit $(EXTRA_CONFIG)" wrap-sdl2
@@ -64,11 +56,10 @@ ruledit-installer:
 
 # Autogen.sh here will make ./win_arch.sh to work.
 # The $(WINACRH) value we got for this run is not good. The new run
-# launched from this target will pick correct value, and can make 'buildable' target
-# to depend on correct arch version.
+# launched from this target will pick correct value.
 snapshot:
 	cd ../.. ; ./autogen.sh --no-configure-run
-	make VERSION_REVTYPE="git" EXTRA_CONFIG="--enable-gitrev --with-project-definition=../../../bootstrap/snapshot.project" buildable
+	make VERSION_REVTYPE="git" EXTRA_CONFIG="--enable-gitrev --with-project-definition=../../../bootstrap/snapshot.project" all
 
 
 # configure Freeciv
@@ -77,13 +68,13 @@ configure-freeciv-common:
 	# create build directory
 	mkdir -p build-$(WINARCH)-$(GUI)
 	# configure
-	cd build-$(WINARCH)-$(GUI); ../../../configure FREECIV_LABEL_FORCE="<base>-msys2" CPPFLAGS="-D_WIN32_WINNT=$(MIN_WIN_VER)" --enable-client=$(GUI) --with-followtag="windows-S3_1" --with-tinycthread --without-readline --disable-sys-lua --enable-fcdb=sqlite3 --with-sqlite3-prefix=/$(ARCHDIR) --enable-fcmp=$(FCMP) $(EXTRA_CONFIG)
+	cd build-$(WINARCH)-$(GUI); ../../../configure FREECIV_LABEL_FORCE="<base>-msys2" CPPFLAGS="-D_WIN32_WINNT=$(MIN_WIN_VER)" --enable-client=$(GUI) --with-followtag="windows-S3_1" --with-tinycthread --without-readline --disable-sys-lua --enable-fcdb=sqlite3 --with-sqlite3-prefix=/$(ARCHDIR) --enable-fcmp=$(FCMP) --with-cacert-path="./ssl/certs/ca-bundle.crt" $(EXTRA_CONFIG)
 
 configure-freeciv-ruledit:
 	# create build directory
 	mkdir -p build-$(WINARCH)-ruledit
 	# configure
-	cd build-$(WINARCH)-ruledit; ../../../configure FREECIV_LABEL_FORCE="<base>-msys2" CPPFLAGS="-D_WIN32_WINNT=$(MIN_WIN_VER)" --disable-client --disable-server --disable-fcmp --disable-freeciv-manual --disable-sys-lua --enable-ruledit --enable-ai-static=stub --with-qt5-includes=/$(ARCHDIR)/include --with-qt5-libs=/$(ARCHDIR)/lib $(EXTRA_CONFIG)
+	cd build-$(WINARCH)-ruledit; ../../../configure FREECIV_LABEL_FORCE="<base>-msys2" CPPFLAGS="-D_WIN32_WINNT=$(MIN_WIN_VER)" --disable-client --disable-server --disable-fcmp --disable-freeciv-manual --disable-sys-lua --enable-ruledit --enable-ai-static=stub --with-cacert-path="./ssl/certs/ca-bundle.crt" --with-qt5-includes=/$(ARCHDIR)/include --with-qt5-libs=/$(ARCHDIR)/lib $(EXTRA_CONFIG)
 
 # install Freeciv
 
@@ -180,7 +171,7 @@ COMMON_DLLS := \
 	libbz2-1.dll \
 	libcairo-2.dll \
 	libcairo-gobject-2.dll \
-	libffi-6.dll \
+	libffi-7.dll \
 	libfontconfig-1.dll \
 	libfreetype-6.dll \
 	$(LIBGCCDLL) \
@@ -202,8 +193,8 @@ COMMON_DLLS := \
 	libxml2-2.dll \
 	zlib1.dll \
 	libwinpthread-1.dll \
-	libicuuc64.dll \
-	libicudt64.dll \
+	libicuuc67.dll \
+	libicudt67.dll \
 	libsqlite3-0.dll \
 	exchndl.dll \
 	mgwhelp.dll \
@@ -216,6 +207,8 @@ COMMON_DLLS := \
 install-env-common:
 	# add DLLs
 	cp -R $(addprefix $(DLLPATH_PREFIX), $(COMMON_DLLS)) install-$(WINARCH)-$(GUI)/
+	mkdir -p install-$(WINARCH)-$(GUI)/ssl/certs
+	cp -R /$(ARCHDIR)/ssl/certs/ca-bundle.crt install-$(WINARCH)-$(GUI)/ssl/certs/
 
 DEFAULT_FCMP_DLLS := \
 	libgdk-3-0.dll \
@@ -229,8 +222,7 @@ DEFAULT_FCMP_DLLS := \
 	libdatrie-1.dll \
 	libpcre-1.dll \
 	libunistring-2.dll \
-	librsvg-2-2.dll \
-	libcroco-0.6-3.dll
+	librsvg-2-2.dll
 
 install-env-default-fcmp: install-env-common
 	cp -R $(addprefix $(DLLPATH_PREFIX), $(DEFAULT_FCMP_DLLS)) install-$(WINARCH)-$(GUI)/
@@ -264,9 +256,9 @@ install-env-sdl2: install-env-default-fcmp
 	cp -R $(addprefix $(DLLPATH_PREFIX), $(SDL2_DLLS)) install-$(WINARCH)-$(GUI)/
 
 QT_DLLS := \
-	libicuin64.dll \
-	libicuuc64.dll \
-	libicudt64.dll \
+	libicuin67.dll \
+	libicuuc67.dll \
+	libicudt67.dll \
 	libpcre16-0.dll \
 	libharfbuzz-0.dll \
 	libsqlite3-0.dll \
@@ -279,7 +271,8 @@ QT_DLLS := \
 	libunistring-2.dll \
 	libbrotlidec.dll \
 	libbrotlicommon.dll \
-	libdouble-conversion.dll
+	libdouble-conversion.dll \
+	libzstd.dll
 
 install-env-qt: install-env-common
 	# add DLLs
@@ -305,7 +298,7 @@ RULEDIT_DLLS := \
 	libbz2-1.dll \
 	libcairo-2.dll \
 	libcairo-gobject-2.dll \
-	libffi-6.dll \
+	libffi-7.dll \
 	libfontconfig-1.dll \
 	libfreetype-6.dll \
 	$(LIBGCCDLL) \
@@ -325,7 +318,8 @@ RULEDIT_DLLS := \
 	libwinpthread-1.dll \
 	libgraphite2.dll \
 	libpcre-1.dll \
-	libdouble-conversion.dll
+	libdouble-conversion.dll \
+	libzstd.dll
 
 install-env-ruledit:
 	# add DLLs

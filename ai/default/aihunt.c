@@ -35,6 +35,7 @@
 /* server */
 #include "citytools.h"
 #include "srv_log.h"
+#include "unithand.h"
 #include "unittools.h"
 
 /* server/advisors */
@@ -98,7 +99,7 @@ static struct unit_type *dai_hunter_guess_best(struct city *pcity,
     }
 
     /* Temporary hack because pathfinding can't handle Fighters. */
-    if (!utype_can_do_action(ut, ACTION_SUICIDE_ATTACK)
+    if (!utype_is_consumed_by_action_result(ACTRES_ATTACK, ut)
         && 1 == utype_fuel(ut)) {
       continue;
     }
@@ -277,12 +278,14 @@ void dai_hunter_choice(struct ai_type *ait, struct player *pplayer,
   }
 
   if (best_sea_hunter) {
-    eval_hunter_want(ait, pplayer, pcity, choice, best_sea_hunter, 
-                     do_make_unit_veteran(pcity, best_sea_hunter));
+    eval_hunter_want(
+      ait, pplayer, pcity, choice, best_sea_hunter,
+      city_production_unit_veteran_level(pcity, best_sea_hunter));
   }
   if (best_land_hunter) {
-    eval_hunter_want(ait, pplayer, pcity, choice, best_land_hunter, 
-                     do_make_unit_veteran(pcity, best_land_hunter));
+    eval_hunter_want(
+      ait, pplayer, pcity, choice, best_land_hunter,
+      city_production_unit_veteran_level(pcity, best_land_hunter));
   }
 }
 
@@ -336,8 +339,8 @@ static void dai_hunter_try_launch(struct ai_type *ait,
         unit_list_iterate(ptile->units, victim) {
           enum diplstate_type ds =
 	    player_diplstate_get(pplayer, unit_owner(victim))->type;
-          struct unit_type *ptype;
-          struct unit_type *victim_type;
+          const struct unit_type *ptype;
+          const struct unit_type *victim_type;
 
           if (ds != DS_WAR) {
             continue;
@@ -368,8 +371,15 @@ static void dai_hunter_try_launch(struct ai_type *ait,
       pf_map_destroy(pfm);
       if (sucker) {
         if (unit_transported(missile)) {
-          unit_transport_unload_send(missile);
+          struct unit *ptrans = unit_transport_get(missile);
+
+          if (is_action_enabled_unit_on_unit(ACTION_TRANSPORT_ALIGHT,
+                                             missile, ptrans)) {
+            unit_do_action(unit_owner(punit), punit->id, ptrans->id,
+                           0, "", ACTION_TRANSPORT_ALIGHT);
+          }
         }
+
         missile->goto_tile = unit_tile(sucker);
         if (dai_unit_goto(ait, missile, unit_tile(sucker))) {
           /* We survived; did they? */
@@ -397,7 +407,7 @@ static void dai_hunter_juiciness(struct player *pplayer, struct unit *punit,
   *stackcost = 0;
 
   unit_list_iterate(unit_tile(target)->units, sucker) {
-    struct unit_type *suck_type = unit_type_get(sucker);
+    const struct unit_type *suck_type = unit_type_get(sucker);
 
     *stackthreat += ATTACK_POWER(suck_type);
     if (unit_has_type_flag(sucker, UTYF_GAMELOSS)) {

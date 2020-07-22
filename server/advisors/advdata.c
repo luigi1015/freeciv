@@ -216,7 +216,7 @@ static void count_my_units(struct player *pplayer)
       adv->stats.units.coast_strict++;
     }
     if (utype_can_do_action(unit_type_get(punit), ACTION_SUICIDE_ATTACK)) {
-      adv->stats.units.missiles++;
+      adv->stats.units.suicide_attackers++;
     }
     if (unit_can_do_action(punit, ACTION_PARADROP)) {
       adv->stats.units.paratroopers++;
@@ -257,9 +257,19 @@ bool is_adv_data_phase_open(struct player *pplayer)
 bool adv_data_phase_init(struct player *pplayer, bool is_new_phase)
 {
   struct adv_data *adv = pplayer->server.adv;
-  int i;
-  int nuke_units;
   bool danger_of_nukes;
+  action_id nuke_actions[MAX_NUM_ACTIONS];
+
+  {
+    int i = 0;
+
+    /* Conventional nukes */
+    action_list_add_all_by_result(nuke_actions, &i, ACTRES_NUKE);
+    action_list_add_all_by_result(nuke_actions, &i, ACTRES_NUKE_CITY);
+    action_list_add_all_by_result(nuke_actions, &i, ACTRES_NUKE_UNITS);
+    /* TODO: worry about spy nuking too? */
+    action_list_end(nuke_actions, i);
+  }
 
   fc_assert_ret_val(adv != NULL, FALSE);
 
@@ -270,7 +280,6 @@ bool adv_data_phase_init(struct player *pplayer, bool is_new_phase)
 
   TIMING_LOG(AIT_AIDATA, TIMER_START);
 
-  nuke_units = num_role_units(action_id_get_role(ACTION_NUKE));
   danger_of_nukes = FALSE;
 
   /*** Threats ***/
@@ -346,24 +355,31 @@ bool adv_data_phase_init(struct player *pplayer, bool is_new_phase)
       /* If our enemy builds missiles, worry about missile defence. */
       if (utype_can_do_action(unit_type_get(punit), ACTION_SUICIDE_ATTACK)
           && unit_type_get(punit)->attack_strength > 1) {
-        adv->threats.missile = TRUE;
+        adv->threats.suicide_attack = TRUE;
       }
 
       /* If he builds nukes, worry a lot. */
-      if (unit_can_do_action(punit, ACTION_NUKE)) {
-        danger_of_nukes = TRUE;
-      }
+      action_list_iterate(nuke_actions, act_id) {
+        if (unit_can_do_action(punit, act_id)) {
+          danger_of_nukes = TRUE;
+        }
+      } action_list_iterate_end;
     } unit_list_iterate_end;
 
     /* Check for nuke capability */
-    for (i = 0; i < nuke_units; i++) {
-      struct unit_type *nuke =
-          get_role_unit(action_id_get_role(ACTION_NUKE), i);
+    action_list_iterate(nuke_actions, act_id) {
+      int i;
+      int nuke_units = num_role_units(action_id_get_role(act_id));
 
-      if (can_player_build_unit_direct(aplayer, nuke)) { 
-        adv->threats.nuclear = 1;
+      for (i = 0; i < nuke_units; i++) {
+        struct unit_type *nuke =
+            get_role_unit(action_id_get_role(act_id), i);
+
+        if (can_player_build_unit_direct(aplayer, nuke)) {
+          adv->threats.nuclear = 1;
+        }
       }
-    }
+    } action_list_iterate_end;
   } players_iterate_end;
 
   /* Increase from fear to terror if opponent actually has nukes */
@@ -471,6 +487,7 @@ bool adv_data_phase_init(struct player *pplayer, bool is_new_phase)
   adv->unhappy_priority = TRADE_WEIGHTING; /* danger */
   adv->angry_priority = TRADE_WEIGHTING * 3; /* grave danger */
   adv->pollution_priority = POLLUTION_WEIGHTING;
+  adv->infra_priority = INFRA_WEIGHTING;
 
   /* Research want */
   if (is_future_tech(research_get(pplayer)->researching)
@@ -843,97 +860,99 @@ void adv_best_government(struct player *pplayer)
 
         /* TODO: Individual and well balanced value. */
         action_iterate(act) {
+          struct action *paction = action_by_number(act);
+
           if (!action_immune_government(gov, act)) {
             /* This government doesn't provide immunity againt this
              * action. */
             continue;
           }
 
-          switch ((enum gen_action)act) {
-          case ACTION_ATTACK:
-          case ACTION_SUICIDE_ATTACK:
-          case ACTION_SPY_INCITE_CITY:
-          case ACTION_SPY_INCITE_CITY_ESC:
-          case ACTION_CONQUER_CITY:
+          switch (paction->result) {
+          case ACTRES_ATTACK:
+          case ACTRES_SPY_INCITE_CITY:
+          case ACTRES_CONQUER_CITY:
             bonus += 4;
             break;
-          case ACTION_SPY_BRIBE_UNIT:
+          case ACTRES_SPY_BRIBE_UNIT:
             bonus += 2;
             break;
-          case ACTION_TRANSFORM_TERRAIN:
+          case ACTRES_TRANSFORM_TERRAIN:
             bonus += 1.5;
             break;
-          case ACTION_CULTIVATE:
-          case ACTION_PLANT:
+          case ACTRES_CULTIVATE:
+          case ACTRES_PLANT:
             bonus += 0.3;
             break;
-          case ACTION_PILLAGE:
+          case ACTRES_PILLAGE:
             bonus += 0.2;
             break;
-          case ACTION_SPY_INVESTIGATE_CITY:
-          case ACTION_INV_CITY_SPEND:
-          case ACTION_SPY_POISON:
-          case ACTION_SPY_POISON_ESC:
-          case ACTION_SPY_STEAL_GOLD:
-          case ACTION_SPY_STEAL_GOLD_ESC:
-          case ACTION_SPY_SABOTAGE_CITY:
-          case ACTION_SPY_SABOTAGE_CITY_ESC:
-          case ACTION_SPY_TARGETED_SABOTAGE_CITY:
-          case ACTION_SPY_TARGETED_SABOTAGE_CITY_ESC:
-          case ACTION_SPY_STEAL_TECH:
-          case ACTION_SPY_STEAL_TECH_ESC:
-          case ACTION_SPY_TARGETED_STEAL_TECH:
-          case ACTION_SPY_TARGETED_STEAL_TECH_ESC:
-          case ACTION_SPY_SABOTAGE_UNIT:
-          case ACTION_SPY_SABOTAGE_UNIT_ESC:
-          case ACTION_CAPTURE_UNITS:
-          case ACTION_STEAL_MAPS:
-          case ACTION_STEAL_MAPS_ESC:
-          case ACTION_BOMBARD:
-          case ACTION_SPY_NUKE:
-          case ACTION_SPY_NUKE_ESC:
-          case ACTION_NUKE:
-          case ACTION_DESTROY_CITY:
-          case ACTION_EXPEL_UNIT:
+          case ACTRES_SPY_INVESTIGATE_CITY:
+          case ACTRES_SPY_POISON:
+          case ACTRES_SPY_SPREAD_PLAGUE:
+          case ACTRES_SPY_STEAL_GOLD:
+          case ACTRES_SPY_SABOTAGE_CITY:
+          case ACTRES_SPY_TARGETED_SABOTAGE_CITY:
+          case ACTRES_SPY_SABOTAGE_CITY_PRODUCTION:
+          case ACTRES_SPY_STEAL_TECH:
+          case ACTRES_SPY_TARGETED_STEAL_TECH:
+          case ACTRES_SPY_SABOTAGE_UNIT:
+          case ACTRES_CAPTURE_UNITS:
+          case ACTRES_STEAL_MAPS:
+          case ACTRES_BOMBARD:
+          case ACTRES_SPY_NUKE:
+          case ACTRES_NUKE:
+          case ACTRES_NUKE_CITY:
+          case ACTRES_NUKE_UNITS:
+          case ACTRES_DESTROY_CITY:
+          case ACTRES_EXPEL_UNIT:
+          case ACTRES_STRIKE_BUILDING:
+          case ACTRES_STRIKE_PRODUCTION:
+          case ACTRES_SPY_ATTACK:
             /* Being a target of this is usually undesireable */
             /* TODO: Individual and well balanced values. */
             bonus += 0.1;
             break;
 
-          case ACTION_MARKETPLACE:
-          case ACTION_FOUND_CITY:
-          case ACTION_DISBAND_UNIT:
-          case ACTION_PARADROP:
-          case ACTION_FORTIFY:
+          case ACTRES_MARKETPLACE:
+          case ACTRES_FOUND_CITY:
+          case ACTRES_DISBAND_UNIT:
+          case ACTRES_PARADROP:
+          case ACTRES_FORTIFY:
             /* Wants the ability to do this to it self. Don't want others
              * to target it. Do nothing since action_immune_government()
              * doesn't separate based on who the actor is. */
             break;
 
-          case ACTION_ESTABLISH_EMBASSY:
-          case ACTION_ESTABLISH_EMBASSY_STAY:
-          case ACTION_TRADE_ROUTE:
-          case ACTION_JOIN_CITY:
-          case ACTION_HELP_WONDER:
-          case ACTION_RECYCLE_UNIT:
-          case ACTION_HOME_CITY:
-          case ACTION_UPGRADE_UNIT:
-          case ACTION_AIRLIFT:
-          case ACTION_HEAL_UNIT:
-          case ACTION_ROAD:
-          case ACTION_CONVERT:
-          case ACTION_BASE:
-          case ACTION_MINE:
-          case ACTION_IRRIGATE:
+          case ACTRES_NONE:
+            /* Ruleset defined */
+            break;
+
+          case ACTRES_ESTABLISH_EMBASSY:
+          case ACTRES_TRADE_ROUTE:
+          case ACTRES_JOIN_CITY:
+          case ACTRES_HELP_WONDER:
+          case ACTRES_RECYCLE_UNIT:
+          case ACTRES_HOME_CITY:
+          case ACTRES_UPGRADE_UNIT:
+          case ACTRES_AIRLIFT:
+          case ACTRES_HEAL_UNIT:
+          case ACTRES_ROAD:
+          case ACTRES_CONVERT:
+          case ACTRES_BASE:
+          case ACTRES_MINE:
+          case ACTRES_IRRIGATE:
+          case ACTRES_CLEAN_POLLUTION:
+          case ACTRES_CLEAN_FALLOUT:
+          case ACTRES_TRANSPORT_ALIGHT:
+          case ACTRES_TRANSPORT_UNLOAD:
+          case ACTRES_TRANSPORT_DISEMBARK:
+          case ACTRES_TRANSPORT_BOARD:
+          case ACTRES_TRANSPORT_EMBARK:
             /* Could be good. An embassy gives permanent contact. A trade
              * route gives gold per turn. Join city gives population. Help
              * wonder gives shields. */
             /* TODO: Individual and well balanced values. */
-            break;
-
-          case ACTION_COUNT:
-            /* Invalid */
-            fc_assert(act != ACTION_COUNT);
             break;
           }
         } action_iterate_end;

@@ -25,7 +25,6 @@
 #include <QHeaderView>
 #include <QLineEdit>
 #include <QPainter>
-#include <QSignalMapper>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QTableWidget>
@@ -177,8 +176,8 @@ void fc_client::create_main_page(void)
     strncpy(msgbuf, _("Qt client"), sizeof(msgbuf) - 1);
   }
 
-  painter.drawText(main_graphics.width()-fm.width(msgbuf)-10,
-                   main_graphics.height()-fm.descent(), msgbuf);
+  painter.drawText(main_graphics.width() - fm.horizontalAdvance (msgbuf)
+                   -10, main_graphics.height() - fm.descent(), msgbuf);
   free_main_pic->setPixmap(main_graphics);
   pages_layout[PAGE_MAIN]->addWidget(free_main_pic,
                                      row++, 0, 1, 2, Qt::AlignCenter);
@@ -208,18 +207,21 @@ void fc_client::create_main_page(void)
       break;
     case 1:
       pages_layout[PAGE_MAIN]->addWidget(button, row + 2, 0);
-      connect(button, SIGNAL(clicked()), switch_page_mapper, SLOT(map()));
-      switch_page_mapper->setMapping(button, PAGE_SCENARIO);
+      QObject::connect(button, &QPushButton::clicked, [this]() {
+        switch_page(PAGE_SCENARIO);
+      });
       break;
     case 2:
       pages_layout[PAGE_MAIN]->addWidget(button, row + 3, 0);
-      connect(button, SIGNAL(clicked()), switch_page_mapper, SLOT(map()));
-      switch_page_mapper->setMapping(button, PAGE_LOAD);
+      QObject::connect(button, &QPushButton::clicked, [this]() {
+        switch_page(PAGE_LOAD);
+      });
       break;
     case 3:
       pages_layout[PAGE_MAIN]->addWidget(button, row + 1, 1);
-      connect(button, SIGNAL(clicked()), switch_page_mapper, SLOT(map()));
-      switch_page_mapper->setMapping(button, PAGE_NETWORK);
+      QObject::connect(button, &QPushButton::clicked, [this]() {
+        switch_page(PAGE_NETWORK);
+      });
       break;
     case 4:
       pages_layout[PAGE_MAIN]->addWidget(button, row + 2, 1);
@@ -389,9 +391,9 @@ void fc_client::create_network_page(void)
   page_network_grid_layout->addWidget(network_button, 5, 0);
 
   network_button = new QPushButton(_("Cancel"));
-  connect(network_button, SIGNAL(clicked()), switch_page_mapper,
-          SLOT(map()));
-  switch_page_mapper->setMapping(network_button, PAGE_MAIN);
+  QObject::connect(network_button, &QPushButton::clicked, [this]() {
+    switch_page(PAGE_MAIN);
+  });
   page_network_grid_layout->addWidget(network_button, 5, 2, 1, 1);
 
   network_button = new QPushButton(_("Connect"));
@@ -443,7 +445,7 @@ void fc_client::clear_status_bar()
 {
   QString str;
 
-  if (status_bar_queue.isEmpty() == false) {
+  if (!status_bar_queue.isEmpty()) {
     str = status_bar_queue.takeFirst();
     status_bar_label->setText(str);
     QTimer::singleShot(2000, this, SLOT(clear_status_bar()));
@@ -522,14 +524,13 @@ void fc_client::create_load_page()
   but->setText(_("Browse..."));
   but->setIcon(QApplication::style()->standardIcon(QStyle::SP_DirIcon));
   connect(but, &QAbstractButton::clicked, this, &fc_client::browse_saves);
-  pages_layout[PAGE_LOAD]->addWidget (but, 3, 0);
+  pages_layout[PAGE_LOAD]->addWidget(but, 3, 0);
 
   but = new QPushButton;
   but->setText(_("Cancel"));
   but->setIcon(QApplication::style()->standardIcon(
                                       QStyle::SP_DialogCancelButton));
   connect(but, &QAbstractButton::clicked, this, &fc_client::slot_disconnect);
-  switch_page_mapper->setMapping(but, PAGE_MAIN);
   pages_layout[PAGE_LOAD]->addWidget(but, 3, 2);
 
   but = new QPushButton;
@@ -597,7 +598,6 @@ void fc_client::create_scenario_page()
   but->setIcon(QApplication::style()->standardIcon(
                                         QStyle::SP_DialogCancelButton));
   connect(but, &QAbstractButton::clicked, this, &fc_client::slot_disconnect);
-  switch_page_mapper->setMapping(but, PAGE_MAIN);
   pages_layout[PAGE_SCENARIO]->addWidget(but, 4, 3);
 
   pages_layout[PAGE_SCENARIO]->setColumnStretch(2, 10);
@@ -813,7 +813,7 @@ void fc_client::browse_saves(void)
   current_file = QFileDialog::getOpenFileName(gui()->central_wdg,
                                               _("Open Save File"),
                                               QDir::homePath(), str);
-  if (current_file.isEmpty() ==  false) {
+  if (!current_file.isEmpty()) {
     start_from_save();
   }
 }
@@ -848,7 +848,7 @@ void fc_client::browse_scenarios(void)
   current_file = QFileDialog::getOpenFileName(gui()->central_wdg,
                                               _("Open Scenario File"),
                                               QDir::homePath(), str);
-  if (current_file.isEmpty() == false) {
+  if (!current_file.isEmpty()) {
     start_scenario();
   }
 }
@@ -1090,8 +1090,11 @@ void fc_client::start_scenario()
     client_start_server();
     send_chat("/detach");
   }
-  if (is_server_running()) {
-    send_chat_printf("/load %s", current_file.toLocal8Bit().data());
+  if (is_server_running() && !current_file.isEmpty()) {
+    QByteArray c_bytes;
+
+    c_bytes = current_file.toLocal8Bit();
+    send_chat_printf("/load %s", c_bytes.data());
     switch_page(PAGE_GAME + 1);
   }
 }
@@ -1105,8 +1108,11 @@ void fc_client::start_from_save()
     client_start_server();
     send_chat("/detach");
   }
-  if (is_server_running()) {
-    send_chat_printf("/load %s", current_file.toLocal8Bit().data());
+  if (is_server_running() && !current_file.isEmpty()) {
+    QByteArray c_bytes;
+
+    c_bytes = current_file.toLocal8Bit();
+    send_chat_printf("/load %s", c_bytes.data());
     switch_page(PAGE_GAME + 1);
   }
 }
@@ -1133,6 +1139,7 @@ void fc_client::slot_selection_changed(const QItemSelection &selected,
   int k, col, n, nat_y, nat_x;
   struct section_file *sf;
   struct srv_list *srvrs;
+  QByteArray fn_bytes;
 
   if (indexes.isEmpty()) {
     return;
@@ -1212,7 +1219,8 @@ void fc_client::slot_selection_changed(const QItemSelection &selected,
       load_save_text->setText("");
       break;
     }
-    if ((sf = secfile_load_section(current_file.toLocal8Bit().data(),
+    fn_bytes = current_file.toLocal8Bit();
+    if ((sf = secfile_load_section(fn_bytes.data(),
                                    "game", TRUE))) {
       const char *sname;
       bool sbool;
@@ -1221,28 +1229,30 @@ void fc_client::slot_selection_changed(const QItemSelection &selected,
       QString pl_str = nullptr;
       int num_players = 0;
       int curr_player = 0;
+      QByteArray pl_bytes;
 
       integer = secfile_lookup_int_default(sf, -1, "game.turn");
       if (integer >= 0) {
         final_str = QString("<b>") + _("Turn") + ":</b> "
-                    + QString::number(integer) + "<br>";
+                    + QString::number(integer).toHtmlEscaped() + "<br>";
       }
-      if ((sf = secfile_load_section(current_file.toLocal8Bit().data(),
+      if ((sf = secfile_load_section(fn_bytes.data(),
                                      "players", TRUE))) {
         integer = secfile_lookup_int_default(sf, -1, "players.nplayers");
         if (integer >= 0) {
           final_str = final_str + "<b>" + _("Players") + ":</b>" + " "
-                      + QString::number(integer) + "<br>";
+                      + QString::number(integer).toHtmlEscaped() + "<br>";
         }
         num_players = integer;
       }
       for (int i = 0; i < num_players; i++) {
         pl_str = QString("player") + QString::number(i);
-        if ((sf = secfile_load_section(current_file.toLocal8Bit().data(),
-                                       pl_str.toLocal8Bit().data(), true))) {
-          if ((sbool = secfile_lookup_bool_default(sf, true,
+        pl_bytes = pl_str.toLocal8Bit();
+        if ((sf = secfile_load_section(fn_bytes.data(),
+                                       pl_bytes.data(), true))) {
+          if (!(sbool = secfile_lookup_bool_default(sf, true,
                                        "player%d.unassigned_user",
-                                       i)) == false) {
+                                       i))) {
               curr_player = i;
               break;
           }
@@ -1255,31 +1265,32 @@ void fc_client::slot_selection_changed(const QItemSelection &selected,
       }
 
       /* Information about human player */
-      if ((sf = secfile_load_section(current_file.toLocal8Bit().data(),
-                                     pl_str.toLocal8Bit().data(), true))) {
+      pl_bytes = pl_str.toLocal8Bit();
+      if ((sf = secfile_load_section(fn_bytes.data(),
+                                     pl_bytes.data(), true))) {
         sname = secfile_lookup_str_default(sf, nullptr, "player%d.nation",
                                            curr_player);
         if (sname) {
           final_str = final_str + "<b>" + _("Nation") + ":</b> "
-                      + QString(sname) + "<br>";
+                      + QString(sname).toHtmlEscaped() + "<br>";
         }
         integer = secfile_lookup_int_default(sf, -1, "player%d.ncities",
                                              curr_player);
         if (integer >= 0) {
           final_str = final_str + "<b>" + _("Cities") + ":</b> "
-                      + QString::number(integer) + "<br>";
+                      + QString::number(integer).toHtmlEscaped() + "<br>";
         }
         integer = secfile_lookup_int_default(sf, -1, "player%d.nunits",
                                              curr_player);
         if (integer >= 0) {
           final_str = final_str + "<b>" + _("Units") + ":</b> "
-                      + QString::number(integer) + "<br>";
+                      + QString::number(integer).toHtmlEscaped() + "<br>";
         }
         integer = secfile_lookup_int_default(sf, -1, "player%d.gold",
                                              curr_player);
         if (integer >= 0) {
           final_str = final_str + "<b>" + _("Gold") + ":</b> "
-                      + QString::number(integer) + "<br>";
+                      + QString::number(integer).toHtmlEscaped() + "<br>";
         }
         nat_x = 0;
         for (nat_y = 0; nat_y > -1; nat_y++) {
@@ -1299,7 +1310,7 @@ void fc_client::slot_selection_changed(const QItemSelection &selected,
         } terrain_type_iterate_end;
 
         /* Load possible terrains and their identifiers (chars) */
-        if ((sf = secfile_load_section(current_file.toLocal8Bit().data(),
+        if ((sf = secfile_load_section(fn_bytes.data(),
                                        "savefile", true)))
           while ((terr_name = secfile_lookup_str_default(sf, NULL,
                                  "savefile.terrident%d.name", ii)) != NULL) {
@@ -1335,14 +1346,14 @@ void fc_client::slot_selection_changed(const QItemSelection &selected,
         }
         load_pix->setFixedSize(load_pix->pixmap()->width(),
                                load_pix->pixmap()->height());
-        if ((sf = secfile_load_section(current_file.toLocal8Bit().data(),
+        if ((sf = secfile_load_section(fn_bytes.data(),
                                        "research", TRUE))) {
           sname = secfile_lookup_str_default(sf, nullptr,
                                              "research.r%d.now_name",
                                              curr_player);
           if (sname) {
             final_str = final_str + "<b>" + _("Researching") + ":</b> "
-                        + QString(sname);
+                        + QString(sname).toHtmlEscaped();
           }
         }
       }
@@ -1370,13 +1381,15 @@ void fc_client::update_load_page(void)
   show_preview->setChecked(gui_options.gui_qt_show_preview);
   fileinfo_list_iterate(files, pfile) {
     QTableWidgetItem *item;
+    QDateTime dt;
+
     item = new QTableWidgetItem();
     item->setData(Qt::UserRole, pfile->fullname);
     saves_load->insertRow(row);
     item->setText(pfile->name);
     saves_load->setItem(row, 0, item);
     item = new QTableWidgetItem();
-    QDateTime dt = QDateTime::fromTime_t(pfile->mtime);
+    dt = QDateTime::fromSecsSinceEpoch(pfile->mtime);
     item->setText(dt.toString(Qt::TextDate));
     saves_load->setItem(row, 1, item);
     row++;
@@ -1457,7 +1470,7 @@ void fc_client::update_scenarios_page(void)
           }
         }
 
-        if (found == true) {
+        if (found) {
           sl = item->data(Qt::UserRole).toStringList();
           found_ver = sl.at(3).toInt();
           if (found_ver < fcver) {
@@ -1471,20 +1484,21 @@ void fc_client::update_scenarios_page(void)
         }
         item->setText(QString(pfile->name));
         format = QString("<br>") + QString(_("Format:")) + " "
-                 + version;
+                 + version.toHtmlEscaped();
         if (sauthors) {
           st = QString("\n") + QString("<b>") + _("Authors: ")
-               + QString("</b>") + QString(sauthors);
+               + QString("</b>") + QString(sauthors).toHtmlEscaped();
         } else {
           st = "";
         }
         sl << "<b>"
            + QString(sname && strlen(sname) ? Q_(sname) : pfile->name)
+             .toHtmlEscaped()
            + "</b>"
-           << pfile->fullname
+           << QString(pfile->fullname).toHtmlEscaped()
            << QString(NULL != sdescription && '\0' != sdescription[0]
-                      ? Q_(sdescription) : "") + st + format
-           << QString::number(fcver);
+                      ? Q_(sdescription) : "").toHtmlEscaped() + st + format
+           << QString::number(fcver).toHtmlEscaped();
         sl.replaceInStrings("\n", "<br>");
         item->setData(Qt::UserRole, sl);
         if (add_item) {
@@ -1541,7 +1555,7 @@ void fc_client::handle_authentication_req(enum authentication_type type,
 }
 
 /**********************************************************************//**
-  if on the network page, switch page to the login page (with new server
+  If on the network page, switch page to the login page (with new server
   and port). if on the login page, send connect and/or authentication
   requests to the server.
 **************************************************************************/
@@ -1549,11 +1563,14 @@ void fc_client::slot_connect()
 {
   char errbuf [512];
   struct packet_authentication_reply reply;
+  QByteArray ba_bytes;
 
   switch (connection_status) {
   case LOGIN_TYPE:
-    sz_strlcpy(user_name, connect_login_edit->text().toLocal8Bit().data());
-    sz_strlcpy(server_host, connect_host_edit->text().toLocal8Bit().data());
+    ba_bytes = connect_login_edit->text().toLocal8Bit();
+    sz_strlcpy(user_name, ba_bytes.data());
+    ba_bytes = connect_host_edit->text().toLocal8Bit();
+    sz_strlcpy(server_host, ba_bytes.data());
     server_port = connect_port_edit->text().toInt();
 
     if (connect_to_server(user_name, server_host, server_port,
@@ -1565,9 +1582,11 @@ void fc_client::slot_connect()
 
     return;
   case NEW_PASSWORD_TYPE:
-    sz_strlcpy(password, connect_password_edit->text().toLatin1().data());
+    ba_bytes = connect_password_edit->text().toLatin1();
+    sz_strlcpy(password, ba_bytes.data());
+    ba_bytes = connect_confirm_password_edit->text().toLatin1();
     sz_strlcpy(reply.password,
-               connect_confirm_password_edit->text().toLatin1().data());
+               ba_bytes.data());
 
     if (strncmp(reply.password, password, MAX_LEN_NAME) == 0) {
       password[0] = '\0';
@@ -1580,8 +1599,9 @@ void fc_client::slot_connect()
 
     return;
   case ENTER_PASSWORD_TYPE:
+    ba_bytes = connect_password_edit->text().toLatin1();
     sz_strlcpy(reply.password,
-               connect_password_edit->text().toLatin1().data());
+               ba_bytes.data());
     send_packet_authentication_reply(&client.conn, &reply);
     set_connection_state(WAITING_TYPE);
     return;
@@ -1863,7 +1883,7 @@ void fc_client::update_buttons()
     }
   } else {
     text = _("Start");
-    if (can_client_access_hack() && client.conn.observer == TRUE) {
+    if (can_client_access_hack() && client.conn.observer) {
       sensitive = true;
       players_iterate(plr) {
         if (is_human(plr)) {
@@ -1903,7 +1923,6 @@ void fc_client::start_page_menu(QPoint pos)
   bool need_empty_team;
   const char *level_cmd, *level_name;
   int level, count;
-  QSignalMapper *player_menu_mapper;
   player *selected_player;
   QVariant qvar, qvar2;
 
@@ -1932,7 +1951,7 @@ void fc_client::start_page_menu(QPoint pos)
   if (qvar == 1) {
     selected_player = (player *) qvar2.value < void *>();
   }
-  player_menu_mapper = new QSignalMapper;
+
   players_iterate(pplayer) {
     if (selected_player && selected_player == pplayer) {
       splayer = QString(pplayer->name);
@@ -1941,26 +1960,26 @@ void fc_client::start_page_menu(QPoint pos)
         str = QString(_("Observe"));
         action = new QAction(str, start_players_tree);
         str = "/observe " + sp;
-        connect(action, SIGNAL(triggered()), player_menu_mapper,
-                SLOT(map()));
-        player_menu_mapper->setMapping(action, str);
+        QObject::connect(action, &QAction::triggered, [this,str]() {
+          send_fake_chat_message(str);
+        });
         menu->addAction(action);
 
         if (ALLOW_CTRL <= client.conn.access_level) {
           str = QString(_("Remove player"));
           action = new QAction(str, start_players_tree);
           str = "/remove " + sp;
-          connect(action, SIGNAL(triggered()), player_menu_mapper,
-                  SLOT(map()));
-          player_menu_mapper->setMapping(action, str);
+          QObject::connect(action, &QAction::triggered, [this,str]() {
+            send_fake_chat_message(str);
+          });
           menu->addAction(action);
         }
         str = QString(_("Take this player"));
         action = new QAction(str, start_players_tree);
         str = "/take " + sp;
-        connect(action, SIGNAL(triggered()), player_menu_mapper,
-                SLOT(map()));
-        player_menu_mapper->setMapping(action, str);
+        QObject::connect(action, &QAction::triggered, [this,str]() {
+          send_fake_chat_message(str);
+        });
         menu->addAction(action);
       }
 
@@ -1968,9 +1987,9 @@ void fc_client::start_page_menu(QPoint pos)
         str = QString(_("Pick nation"));
         action = new QAction(str, start_players_tree);
         str = "PICK:" + QString(player_name(pplayer));  /* PICK is a key */
-        connect(action, SIGNAL(triggered()), player_menu_mapper,
-                SLOT(map()));
-        player_menu_mapper->setMapping(action, str);
+        QObject::connect(action, &QAction::triggered, [this,str]() {
+          send_fake_chat_message(str);
+        });
         menu->addAction(action);
       }
 
@@ -1988,9 +2007,9 @@ void fc_client::start_page_menu(QPoint pos)
               level_cmd = ai_level_cmd(static_cast < ai_level > (level));
               action = new QAction(QString(level_name), start_players_tree);
               str = "/" + QString(level_cmd) + " " + sp;
-              connect(action, SIGNAL(triggered()), player_menu_mapper,
-                      SLOT(map()));
-              player_menu_mapper->setMapping(action, str);
+              QObject::connect(action, &QAction::triggered, [this,str]() {
+                send_fake_chat_message(str);
+              });
               submenu_AI->addAction(action);
             }
           }
@@ -2018,9 +2037,9 @@ void fc_client::start_page_menu(QPoint pos)
           action = new QAction(str, start_players_tree);
           str = "/team" + sp + " \"" + QString(team_slot_rule_name(tslot))
               + "\"";
-          connect(action, SIGNAL(triggered()),
-                  player_menu_mapper, SLOT(map()));
-          player_menu_mapper->setMapping(action, str);
+          QObject::connect(action, &QAction::triggered, [this,str]() {
+            send_fake_chat_message(str);
+          });
           submenu_team->addAction(action);
         } team_slots_iterate_end;
       }
@@ -2029,18 +2048,17 @@ void fc_client::start_page_menu(QPoint pos)
         str = QString(_("Aitoggle player"));
         action = new QAction(str, start_players_tree);
         str = "/aitoggle " + sp;
-        connect(action, SIGNAL(triggered()), player_menu_mapper,
-                SLOT(map()));
-        player_menu_mapper->setMapping(action, str);
+        QObject::connect(action, &QAction::triggered, [this,str]() {
+          send_fake_chat_message(str);
+        });
         menu->addAction(action);
       }
-      connect(player_menu_mapper, SIGNAL(mapped(const QString &)),
-              this, SLOT(send_fake_chat_message(const QString &)));
+
       menu->popup(global_pos);
       return;
     }
   } players_iterate_end;
-  delete player_menu_mapper;
+
 }
 
 /**********************************************************************//**
@@ -2089,7 +2107,7 @@ void fc_client::update_sidebar_tooltips()
     max = 100;
   }
 
-  if (client_is_global_observer() == false) {
+  if (!client_is_global_observer()) {
     sw_science->set_tooltip(science_dialog_text());
     str = QString(nation_plural_for_player(client_player()));
     str = str + '\n' + get_info_label_text(false);
@@ -2135,12 +2153,12 @@ void center_next_enemy_city()
   players_iterate(pplayer) {
     if (pplayer != client_player()) {
       city_list_iterate(pplayer->cities, pcity) {
-        if (first_tile == false) {
+        if (!first_tile) {
           first_tile = true;
           ptile = pcity->tile;
           first_id = pcity->id;
         }
-        if ((last_center_enemy_city == 0) || center_next == true) {
+        if ((last_center_enemy_city == 0) || center_next) {
           last_center_enemy_city = pcity->id;
           center_tile_mapcanvas(pcity->tile);
           return;
@@ -2171,12 +2189,12 @@ void center_next_player_city()
   players_iterate(pplayer) {
     if (pplayer == client_player()) {
       city_list_iterate(pplayer->cities, pcity) {
-        if (first_tile == false) {
+        if (!first_tile) {
           first_tile = true;
           ptile = pcity->tile;
           first_id = pcity->id;
         }
-        if ((last_center_player_city == 0) || center_next == true) {
+        if ((last_center_player_city == 0) || center_next) {
           last_center_player_city = pcity->id;
           center_tile_mapcanvas(pcity->tile);
           return;
@@ -2211,12 +2229,12 @@ void center_next_player_capital()
       if (capital == nullptr) {
         continue;
       }
-        if (first_tile == false) {
+        if (!first_tile) {
           first_tile = true;
           ptile = capital->tile;
           first_id = capital->id;
         }
-        if ((last_center_player_city == 0) || center_next == true) {
+        if ((last_center_player_city == 0) || center_next) {
           last_center_player_city = capital->id;
           center_tile_mapcanvas(capital->tile);
           put_cross_overlay_tile(capital->tile);
@@ -2262,12 +2280,12 @@ void cycle_enemy_units()
   players_iterate(pplayer) {
     if (pplayer != client_player()) {
       unit_list_iterate(pplayer->units, punit) {
-        if (first_tile == false) {
+        if (!first_tile) {
           first_tile = true;
           ptile = punit->tile;
           first_id = punit->id;
         }
-        if ((last_center_enemy == 0) || center_next == true) {
+        if ((last_center_enemy == 0) || center_next) {
           last_center_enemy = punit->id;
           center_tile_mapcanvas(punit->tile);
           return;

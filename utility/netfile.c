@@ -15,6 +15,8 @@
 #include <fc_config.h>
 #endif
 
+#ifndef __EMSCRIPTEN__
+
 #include <curl/curl.h>
 
 #ifdef FREECIV_MSWINDOWS
@@ -55,6 +57,10 @@ static CURL *netfile_init_handle(void)
 
   error_buf_curl[0] = '\0';
   curl_easy_setopt(handle, CURLOPT_ERRORBUFFER, error_buf_curl);
+
+#ifdef CUSTOM_CACERT_PATH
+  curl_easy_setopt(handle, CURLOPT_CAINFO, CUSTOM_CACERT_PATH);
+#endif /* CUSTOM_CERT_PATH */
 
   return handle;
 }
@@ -276,3 +282,5 @@ bool netfile_send_post(const char *URL, struct netfile_post *post,
 
   return TRUE;
 }
+
+#endif /* __EMSCRIPTEN__ */

@@ -28,8 +28,6 @@
 #define traderoute_packet_list_iterate_end LIST_ITERATE_END
 
 int build_points_left(struct city *pcity);
-int do_make_unit_veteran(struct city *pcity,
-			 const struct unit_type *punittype);
 
 void transfer_city_units(struct player *pplayer, struct player *pvictim, 
 			 struct unit_list *units, struct city *pcity,
@@ -68,9 +66,11 @@ void create_city(struct player *pplayer, struct tile *ptile,
 		 const char *name, struct player *nationality);
 void remove_city(struct city *pcity);
 
-void establish_trade_route(struct city *pc1, struct city *pc2);
-struct trade_route *remove_trade_route(struct city *pc1, struct trade_route *proute,
+struct trade_route *remove_trade_route(struct city *pc1,
+                                       struct trade_route *proute,
                                        bool announce, bool source_gone);
+
+void city_illness_strike(struct city *pcity);
 
 void do_sell_building(struct player *pplayer, struct city *pcity,
                       struct impr_type *pimprove, const char *reason);

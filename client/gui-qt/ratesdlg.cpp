@@ -21,6 +21,7 @@
 #include <QGroupBox>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QScreen>
 #include <QVBoxLayout>
 
 // common
@@ -152,11 +153,11 @@ multipler_rates_dialog::multipler_rates_dialog(QWidget *parent,
     slider = new QSlider(Qt::Horizontal, this);
     slider->setMinimum(mult_to_scale(pmul, pmul->start));
     slider->setMaximum(mult_to_scale(pmul, pmul->stop));
-    slider->setValue(val);
+    slider->setValue(mult_to_scale(pmul, val));
     connect(slider, &QAbstractSlider::valueChanged,
             this, &multipler_rates_dialog::slot_set_value);
     slider_list.append(slider);
-    label = new QLabel(QString::number(val));
+    label = new QLabel(QString::number(mult_to_scale(pmul, val)));
     hb->addWidget(slider);
     slider->setEnabled(multiplier_can_be_changed(pmul, client_player()));
     hb->addWidget(label);
@@ -246,12 +247,13 @@ int scale_to_mult(const struct multiplier *pmul, int scale)
 **************************************************************************/
 void popup_rates_dialog(void)
 {
+  QList<QScreen *> screens = QGuiApplication::screens();
+  QRect rect = screens[0]->availableGeometry();
   QPoint p;
-  QRect rect;
+  tax_rates_dialog *trd;
 
   p = QCursor::pos();
-  rect = QApplication::desktop()->availableGeometry();
-  tax_rates_dialog *trd = new tax_rates_dialog(gui()->central_wdg);
+  trd = new tax_rates_dialog(gui()->central_wdg);
   p.setY(p.y() - trd->height() / 2);
   if (p.y() < 50) {
     p.setY(50);

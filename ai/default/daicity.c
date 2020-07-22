@@ -81,7 +81,7 @@
 #include "specvec.h"
 
 #define SPECVEC_TAG impr
-#define SPECVEC_TYPE struct impr_type *
+#define SPECVEC_TYPE const struct impr_type *
 #include "specvec.h"
 
 /* Iterate over cities within a certain range around a given city
@@ -312,6 +312,16 @@ static void dai_city_choose_build(struct ai_type *ait, struct player *pplayer,
 
     ADV_CHOICE_ASSERT(city_data->choice);
 
+#ifdef ADV_CHOICE_TRACK
+    if (city_data->choice.log_if_chosen) {
+      log_normal("%s wants %s for %s with desire " ADV_WANT_PRINTF ".",
+                 city_name_get(pcity),
+                 dai_choice_rule_name(&city_data->choice),
+                 city_data->choice.use,
+                 city_data->choice.want);
+    }
+#endif /* ADV_CHOICE_TRACK */
+
     CITY_LOG(LOG_DEBUG, pcity, "wants %s with desire " ADV_WANT_PRINTF ".",
 	     dai_choice_rule_name(&city_data->choice),
 	     city_data->choice.want);
@@ -370,8 +380,16 @@ static void increase_maxbuycost(struct player *pplayer, int new_value)
 **************************************************************************/
 static void dai_upgrade_units(struct city *pcity, int limit, bool military)
 {
+  action_id upgrade_actions[MAX_NUM_ACTIONS];
   struct player *pplayer = city_owner(pcity);
   int expenses;
+
+  {
+    /* Find upgrade unit actions */
+    int i = 0;
+    action_list_add_all_by_result(upgrade_actions, &i, ACTRES_UPGRADE_UNIT);
+    action_list_end(upgrade_actions, i);
+  }
 
   dai_calc_data(pplayer, NULL, &expenses, NULL);
 
@@ -379,8 +397,8 @@ static void dai_upgrade_units(struct city *pcity, int limit, bool military)
     if (pcity->owner == punit->owner) {
       /* Only upgrade units you own, not allied ones */
 
-      struct unit_type *old_type = unit_type_get(punit);
-      struct unit_type *punittype = can_upgrade_unittype(pplayer, old_type);
+      const struct unit_type *old_type = unit_type_get(punit);
+      const struct unit_type *punittype = can_upgrade_unittype(pplayer, old_type);
 
       if (military && !IS_ATTACKER(old_type)) {
         /* Only upgrade military units this round */
@@ -390,7 +408,12 @@ static void dai_upgrade_units(struct city *pcity, int limit, bool military)
         continue;
       }
 
-      if (punittype) {
+      if (punittype == NULL) {
+        continue;
+      }
+
+      action_list_iterate(upgrade_actions, act_id) {
+        const struct action *paction = action_by_number(act_id);
         int cost = unit_upgrade_price(pplayer, old_type, punittype);
         int real_limit = limit;
 
@@ -409,11 +432,11 @@ static void dai_upgrade_units(struct city *pcity, int limit, bool military)
                    military ? "military" : "civilian");
           unit_do_action(city_owner(pcity), punit->id,
                          pcity->id, 0, "",
-                         ACTION_UPGRADE_UNIT);
+                         paction->id);
         } else {
           increase_maxbuycost(pplayer, cost);
         }
-      }
+      } action_list_iterate_end;
     }
   } unit_list_iterate_end;
 }
@@ -1177,9 +1200,13 @@ void dai_city_load(struct ai_type *ait, const char *aitstr,
 static int action_target_neg_util(action_id act_id,
                                   const struct city *pcity)
 {
-  switch ((enum gen_action)act_id) {
-  case ACTION_SPY_INCITE_CITY:
-  case ACTION_SPY_INCITE_CITY_ESC:
+  struct action *paction = action_by_number(act_id);
+
+  fc_assert_msg(action_id_exists(act_id),
+                "Action %d don't exist.", act_id);
+
+  switch (paction->result) {
+  case ACTRES_SPY_INCITE_CITY:
     /* Copied from the evaluation of the No_Incite effect */
     return MAX((game.server.diplchance * 2
                 - game.server.incite_total_factor) / 2
@@ -1187,87 +1214,89 @@ static int action_target_neg_util(action_id act_id,
                - game.server.incite_unit_factor * 5, 0);
 
   /* Really bad for the city owner. */
-  case ACTION_SPY_NUKE:
-  case ACTION_SPY_NUKE_ESC:
-  case ACTION_CONQUER_CITY:
+  case ACTRES_SPY_NUKE:
+  case ACTRES_CONQUER_CITY:
   /* The ai will never destroy his own city to keep it out of enemy
    * hands. If it starts supporting it this value should change. */
-  case ACTION_DESTROY_CITY:
+  case ACTRES_DESTROY_CITY:
     return 20;
 
   /* Bad for the city owner. */
-  case ACTION_SPY_POISON:
-  case ACTION_SPY_POISON_ESC:
-  case ACTION_SPY_SABOTAGE_CITY:
-  case ACTION_SPY_SABOTAGE_CITY_ESC:
-  case ACTION_SPY_TARGETED_SABOTAGE_CITY:
-  case ACTION_SPY_TARGETED_SABOTAGE_CITY_ESC:
-  case ACTION_SPY_STEAL_GOLD:
-  case ACTION_SPY_STEAL_GOLD_ESC:
+  case ACTRES_SPY_POISON:
+  case ACTRES_SPY_SPREAD_PLAGUE:
+  case ACTRES_SPY_SABOTAGE_CITY:
+  case ACTRES_SPY_TARGETED_SABOTAGE_CITY:
+  case ACTRES_SPY_SABOTAGE_CITY_PRODUCTION:
+  case ACTRES_STRIKE_BUILDING:
+  case ACTRES_STRIKE_PRODUCTION:
+  case ACTRES_SPY_STEAL_GOLD:
+  case ACTRES_NUKE_CITY:
     /* TODO: Individual and well balanced values */
     return 10;
 
   /* Good for an enemy */
-  case ACTION_SPY_STEAL_TECH:
-  case ACTION_SPY_STEAL_TECH_ESC:
-  case ACTION_SPY_TARGETED_STEAL_TECH:
-  case ACTION_SPY_TARGETED_STEAL_TECH_ESC:
-  case ACTION_STEAL_MAPS:
-  case ACTION_STEAL_MAPS_ESC:
+  case ACTRES_SPY_STEAL_TECH:
+  case ACTRES_SPY_TARGETED_STEAL_TECH:
+  case ACTRES_STEAL_MAPS:
     /* TODO: Individual and well balanced values */
     return 8;
 
   /* Could be worse */
-  case ACTION_ESTABLISH_EMBASSY:
-  case ACTION_ESTABLISH_EMBASSY_STAY:
-  case ACTION_SPY_INVESTIGATE_CITY:
-  case ACTION_INV_CITY_SPEND:
-  case ACTION_MARKETPLACE:
+  case ACTRES_ESTABLISH_EMBASSY:
+  case ACTRES_SPY_INVESTIGATE_CITY:
+  case ACTRES_MARKETPLACE:
     /* TODO: Individual and well balanced values */
     return 1;
 
   /* Good for the city owner in most cases. */
-  case ACTION_TRADE_ROUTE:
-  case ACTION_HELP_WONDER:
-  case ACTION_JOIN_CITY:
-  case ACTION_RECYCLE_UNIT:
-  case ACTION_HOME_CITY:
-  case ACTION_UPGRADE_UNIT:
-  case ACTION_AIRLIFT:
+  case ACTRES_TRADE_ROUTE:
+  case ACTRES_HELP_WONDER:
+  case ACTRES_JOIN_CITY:
+  case ACTRES_RECYCLE_UNIT:
+  case ACTRES_HOME_CITY:
+  case ACTRES_UPGRADE_UNIT:
+  case ACTRES_AIRLIFT:
     /* TODO: Individual and well balanced values */
     return -1;
 
+  /* Ruleset defined actions. We have no idea what they do. */
+  case ACTRES_NONE:
+    return 0;
+
   /* Shouldn't happen. */
-  case ACTION_SPY_BRIBE_UNIT:
-  case ACTION_SPY_SABOTAGE_UNIT:
-  case ACTION_SPY_SABOTAGE_UNIT_ESC:
-  case ACTION_EXPEL_UNIT:
-  case ACTION_DISBAND_UNIT:
-  case ACTION_CAPTURE_UNITS:
-  case ACTION_BOMBARD:
-  case ACTION_FOUND_CITY:
-  case ACTION_NUKE:
-  case ACTION_PARADROP:
-  case ACTION_ATTACK:
-  case ACTION_SUICIDE_ATTACK:
-  case ACTION_HEAL_UNIT:
-  case ACTION_TRANSFORM_TERRAIN:
-  case ACTION_CULTIVATE:
-  case ACTION_PLANT:
-  case ACTION_PILLAGE:
-  case ACTION_FORTIFY:
-  case ACTION_ROAD:
-  case ACTION_CONVERT:
-  case ACTION_BASE:
-  case ACTION_MINE:
-  case ACTION_IRRIGATE:
-  case ACTION_COUNT:
+  case ACTRES_SPY_BRIBE_UNIT:
+  case ACTRES_SPY_SABOTAGE_UNIT:
+  case ACTRES_SPY_ATTACK:
+  case ACTRES_EXPEL_UNIT:
+  case ACTRES_DISBAND_UNIT:
+  case ACTRES_CAPTURE_UNITS:
+  case ACTRES_BOMBARD:
+  case ACTRES_FOUND_CITY:
+  case ACTRES_NUKE:
+  case ACTRES_NUKE_UNITS:
+  case ACTRES_PARADROP:
+  case ACTRES_ATTACK:
+  case ACTRES_HEAL_UNIT:
+  case ACTRES_TRANSFORM_TERRAIN:
+  case ACTRES_CULTIVATE:
+  case ACTRES_PLANT:
+  case ACTRES_PILLAGE:
+  case ACTRES_CLEAN_POLLUTION:
+  case ACTRES_CLEAN_FALLOUT:
+  case ACTRES_FORTIFY:
+  case ACTRES_ROAD:
+  case ACTRES_CONVERT:
+  case ACTRES_BASE:
+  case ACTRES_MINE:
+  case ACTRES_IRRIGATE:
+  case ACTRES_TRANSPORT_ALIGHT:
+  case ACTRES_TRANSPORT_BOARD:
+  case ACTRES_TRANSPORT_UNLOAD:
+  case ACTRES_TRANSPORT_DISEMBARK:
+  case ACTRES_TRANSPORT_EMBARK:
     fc_assert_msg(action_id_get_target_kind(act_id) == ATK_CITY,
                   "Action not aimed at cities");
   }
-
-  fc_assert_msg(action_id_exists(act_id),
-                "Action %d don't exist.", act_id);
 
   /* Wrong action. Ignore it. */
   return 0;
@@ -1285,7 +1314,7 @@ static int action_target_neg_util(action_id act_id,
 static bool adjust_wants_for_reqs(struct ai_type *ait,
                                   struct player *pplayer,
                                   struct city *pcity,
-                                  struct impr_type *pimprove,
+                                  const struct impr_type *pimprove,
                                   const adv_want v)
 {
   bool all_met = TRUE;
@@ -1341,7 +1370,7 @@ static bool adjust_wants_for_reqs(struct ai_type *ait,
     int i;
 
     for (i = 0; i < n_needed_improvements; i++) {
-      struct impr_type *needed_impr = *impr_vector_get(&needed_improvements, i);
+      const struct impr_type *needed_impr = *impr_vector_get(&needed_improvements, i);
       /* TODO: increase the want for the needed_impr,
        * if we can build it now */
       /* Recurse */
@@ -1986,14 +2015,14 @@ void dai_consider_wonder_city(struct ai_type *ait, struct city *pcity, bool *res
 **************************************************************************/
 Impr_type_id dai_find_source_building(struct city *pcity,
                                       enum effect_type effect_type,
-                                      struct unit_type *utype)
+                                      const struct unit_type *utype)
 {
   int greatest_value = 0;
-  struct impr_type *best_building = NULL;
+  const struct impr_type *best_building = NULL;
 
   effect_list_iterate(get_effects(effect_type), peffect) {
     if (peffect->value > greatest_value) {
-      struct impr_type *building = NULL;
+      const struct impr_type *building = NULL;
       bool wrong_unit = FALSE;
 
       requirement_vector_iterate(&peffect->reqs, preq) {

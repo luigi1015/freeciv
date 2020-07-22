@@ -54,15 +54,22 @@
 
 /* 8-times unrolled loop */
 #define DUFFS_LOOP8(pixel_copy_increment, width)			\
-{ int n = (width+7)/8;							\
+{ int n = (width + 7) / 8;						\
 	switch (width & 7) {						\
 	case 0: do {	pixel_copy_increment;				\
+                        fc__fallthrough;                                \
 	case 7:		pixel_copy_increment;				\
+                        fc__fallthrough;                                \
 	case 6:		pixel_copy_increment;				\
+                        fc__fallthrough;                                \
 	case 5:		pixel_copy_increment;				\
+                        fc__fallthrough;                                \
 	case 4:		pixel_copy_increment;				\
+                        fc__fallthrough;                                \
 	case 3:		pixel_copy_increment;				\
+                        fc__fallthrough;                                \
 	case 2:		pixel_copy_increment;				\
+                        fc__fallthrough;                                \
 	case 1:		pixel_copy_increment;				\
 		} while ( --n > 0 );					\
 	}								\
@@ -70,11 +77,14 @@
 
 /* 4-times unrolled loop */
 #define DUFFS_LOOP4(pixel_copy_increment, width)			\
-{ int n = (width+3)/4;							\
+{ int n = (width + 3) / 4;						\
 	switch (width & 3) {						\
 	case 0: do {	pixel_copy_increment;				\
+                        fc__fallthrough;                                \
 	case 3:		pixel_copy_increment;				\
+                        fc__fallthrough;                                \
 	case 2:		pixel_copy_increment;				\
+                        fc__fallthrough;                                \
 	case 1:		pixel_copy_increment;				\
 		} while ( --n > 0 );					\
 	}								\
@@ -92,6 +102,7 @@
 	    n = ( w + 2 ) / 4;						\
 	    switch ( w & 2 ) {						\
 	    case 0: do {	double_pixel_copy_increment;		\
+                                fc__fallthrough;                        \
 	    case 2:		double_pixel_copy_increment;		\
 		    } while ( --n > 0 );				\
 	    }								\
@@ -205,9 +216,12 @@ struct main {
 extern struct main Main;
 
 /* GUI layer */
+/* A gui_layer is a surface with its own origin. Each widget belongs
+ * to a gui_layer. gui_layers are stored in an array Main.guis
+ * (a "window manager"). */
 
 struct gui_layer {
-  SDL_Rect dest_rect;  /* only x and y are used */
+  SDL_Rect dest_rect;  /* origin: only x and y are used */
   SDL_Surface *surface;
 };
 
@@ -220,6 +234,7 @@ struct gui_layer *add_gui_layer(int width, int height);
 void remove_gui_layer(struct gui_layer *gui_layer);
 
 void screen_rect_to_layer_rect(struct gui_layer *gui_layer, SDL_Rect *dest_rect);
+void layer_rect_to_screen_rect(struct gui_layer *gui_layer, SDL_Rect *dest_rect);
 
 /* ---------- */
 

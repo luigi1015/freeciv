@@ -224,7 +224,7 @@ void mpgui::setup(QWidget *central, struct fcmp_params *params)
 
   connect(mplist_table, SIGNAL(cellClicked(int, int)), this, SLOT(row_selected(int, int)));
   connect(mplist_table, SIGNAL(doubleClicked(QModelIndex)), this, SLOT(row_download(QModelIndex)));
-  connect(this, SIGNAL(display_msg_thr_signal(const char *)), this, SLOT(display_msg(const char *)));
+  connect(this, SIGNAL(display_msg_thr_signal(QString)), this, SLOT(display_msg(QString)));
   connect(this, SIGNAL(progress_thr_signal(int, int)), this, SLOT(progress(int, int)));
   connect(this, SIGNAL(refresh_list_versions_thr_signal()), this, SLOT(refresh_list_versions()));
 
@@ -265,10 +265,12 @@ void mpgui::setup(QWidget *central, struct fcmp_params *params)
 /**********************************************************************//**
   Display status message
 **************************************************************************/
-void mpgui::display_msg(const char *msg)
+void mpgui::display_msg(QString msg)
 {
-  log_verbose("%s", msg);
-  msg_dspl->setText(QString::fromUtf8(msg));
+  QByteArray msg_bytes = msg.toLocal8Bit();
+
+  log_verbose("%s", msg_bytes.data());
+  msg_dspl->setText(msg);
 }
 
 /**********************************************************************//**
@@ -276,7 +278,7 @@ void mpgui::display_msg(const char *msg)
 **************************************************************************/
 void mpgui::display_msg_thr(const char *msg)
 {
-  emit display_msg_thr_signal(msg);
+  emit display_msg_thr_signal(QString::fromUtf8(msg));
 }
 
 /**********************************************************************//**
@@ -331,11 +333,13 @@ void mpgui::refresh_list_versions()
     int type_int;
     const char *new_inst;
     enum modpack_type type;
+    QByteArray name_bytes;
 
     name_str = mplist_table->item(i, ML_COL_NAME)->text();
     type_int = mplist_table->item(i, ML_TYPE)->text().toInt();
     type = (enum modpack_type) type_int;
-    new_inst = mpdb_installed_version(name_str.toUtf8().data(), type);
+    name_bytes = name_str.toUtf8();
+    new_inst = mpdb_installed_version(name_bytes.data(), type);
 
     if (new_inst == nullptr) {
       new_inst = _("Not installed");

@@ -2,6 +2,10 @@
 #include "freeciv_config.h"
 #include "version_gen.h"
 
+/* This header file is shipped in some binary distributions.
+ * It is included purely for reference as to how the executables were built,
+ * and changing it will have no functional effect on pre-built binaries. */
+
 #define MESON_BUILD
 
 #define LOCALEDIR "@LOCALEDIR@"
@@ -29,6 +33,8 @@
 
 #define BINDIR "@BINDIR@"
 
+#define _GNU_SOURCE
+
 /* Release cycle information */
 #mesondefine IS_DEVEL_VERSION
 
@@ -40,6 +46,12 @@
 
 /* audio via SDL2_mixer */
 #mesondefine AUDIO_SDL2
+
+/* Can run programs as root */
+#mesondefine ALWAYS_ROOT
+
+/* struct ip_mreqn available */
+#mesondefine HAVE_IP_MREQN
 
 /* arpa/inet.h available */
 #mesondefine HAVE_ARPA_INET_H
@@ -174,6 +186,11 @@
 #define HAVE_WORKING_VFORK 1
 #endif
 
+/* iconv() available */
+#mesondefine HAVE_ICONV
+
+#define ICONV_CONST const
+
 /* backtrace() available */
 #mesondefine HAVE_BACKTRACE
 
@@ -290,3 +307,16 @@
 
 /* _stricoll() available */
 #mesondefine HAVE__STRICOLL
+
+/* fcntl() available */
+#mesondefine HAVE_FCNTL
+
+/* ioctl() available */
+#mesondefine HAVE_IOCTL
+
+#if defined(HAVE_FCNTL) || defined(HAVE_IOCTL)
+#define NONBLOCKING_SOCKETS 1
+#endif
+
+/* Custom path to CA cert bundle */
+#mesondefine CUSTOM_CACERT_PATH

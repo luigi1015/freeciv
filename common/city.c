@@ -640,7 +640,7 @@ Output_type_id output_type_by_identifier(const char *id)
   Output_type_id o;
 
   for (o = 0; o < O_LAST; o++) {
-    if (fc_strcasecmp(output_types[o].name, id) == 0) {
+    if (fc_strcasecmp(output_types[o].id, id) == 0) {
       return o;
     }
   }
@@ -652,7 +652,7 @@ Output_type_id output_type_by_identifier(const char *id)
   Return the extended name of the building.
 **************************************************************************/
 const char *city_improvement_name_translation(const struct city *pcity,
-					      struct impr_type *pimprove)
+					      const struct impr_type *pimprove)
 {
   static char buffer[256];
   const char *state = NULL;
@@ -728,7 +728,7 @@ int city_production_build_shield_cost(const struct city *pcity)
 bool city_production_build_units(const struct city *pcity,
                                  bool add_production, int *num_units)
 {
-  struct unit_type *utype;
+  const struct unit_type *utype;
   struct universal target;
   int build_slots = city_build_slots(pcity);
   int shields_left = pcity->shield_stock;
@@ -779,6 +779,21 @@ bool city_production_build_units(const struct city *pcity,
   return TRUE;
 }
 
+/************************************************************************//**
+  How many veteran levels will created unit of this type get?
+****************************************************************************/
+int city_production_unit_veteran_level(struct city *pcity,
+                                       const struct unit_type *punittype)
+{
+  int levels = get_unittype_bonus(city_owner(pcity), pcity->tile, punittype,
+                                  EFT_VETERAN_BUILD);
+  int max_levels = utype_veteran_levels(punittype) - 1;
+
+  levels = CLIP(0, levels, max_levels);
+
+  return levels;
+}
+
 /**********************************************************************//**
  Calculates the turns which are needed to build the requested
  production in the city.  GUI Independent.
@@ -794,7 +809,7 @@ int city_production_turns_to_build(const struct city *pcity,
   it is obsolete.
 **************************************************************************/
 bool can_city_build_improvement_direct(const struct city *pcity,
-                                       struct impr_type *pimprove)
+                                       const struct impr_type *pimprove)
 {
   if (!can_player_build_improvement_direct(city_owner(pcity), pimprove)) {
     return FALSE;
@@ -814,7 +829,7 @@ bool can_city_build_improvement_direct(const struct city *pcity,
   the building is obsolete.
 **************************************************************************/
 bool can_city_build_improvement_now(const struct city *pcity,
-                                    struct impr_type *pimprove)
+                                    const struct impr_type *pimprove)
 {  
   if (!can_city_build_improvement_direct(pcity, pimprove)) {
     return FALSE;
@@ -831,7 +846,7 @@ bool can_city_build_improvement_now(const struct city *pcity,
   returns FALSE if improvement can never possibly be built in this city.
 **************************************************************************/
 bool can_city_build_improvement_later(const struct city *pcity,
-                                      struct impr_type *pimprove)
+                                      const struct impr_type *pimprove)
 {
   /* Can the _player_ ever build this improvement? */
   if (!can_player_build_improvement_later(city_owner(pcity), pimprove)) {
@@ -863,9 +878,11 @@ bool can_city_build_unit_direct(const struct city *pcity,
     return FALSE;
   }
 
-  /* Check to see if the unit has a building requirement. */
-  if (punittype->need_improvement
-      && !city_has_building(pcity, punittype->need_improvement)) {
+  /* Check unit build requirements. */
+  if (!are_reqs_active(city_owner(pcity), NULL,
+                       pcity, NULL, city_tile(pcity), NULL, punittype,
+                       NULL, NULL, NULL,
+                       &punittype->build_reqs, RPT_CERTAIN)) {
     return FALSE;
   }
 
@@ -1391,6 +1408,23 @@ bool city_can_work_tile(const struct city *pcity, const struct tile *ptile)
 }
 
 /**********************************************************************//**
+  Returns TRUE iff it is illegal to found a city on the specified tile
+  because of citymindist.
+**************************************************************************/
+bool citymindist_prevents_city_on_tile(const struct tile *ptile)
+{
+  /* citymindist minimum is 1, meaning adjacent is okay */
+  int citymindist = game.info.citymindist;
+  square_iterate(&(wld.map), ptile, citymindist - 1, ptile1) {
+    if (tile_city(ptile1)) {
+      return TRUE;
+    }
+  } square_iterate_end;
+
+  return FALSE;
+}
+
+/**********************************************************************//**
   Returns TRUE if the given unit can build a city at the given map
   coordinates.
 
@@ -1400,114 +1434,67 @@ bool city_can_work_tile(const struct city *pcity, const struct tile *ptile)
 bool city_can_be_built_here(const struct tile *ptile,
                             const struct unit *punit)
 {
-  return (CB_OK == city_build_here_test(ptile, punit));
-}
-
-/**********************************************************************//**
-  Return TRUE iff the ruleset allows founding a city at a tile claimed by
-  someone else.
-
-  Since a local DiplRel requirement can be against something else than a
-  tile an unclaimed tile can't always contradict a local DiplRel
-  requirement. With knowledge about what entities each requirement in a
-  requirement vector is evaluated against a contradiction can be
-  introduced.
-
-  TODO: Get rid of this together with CB_BAD_BORDERS.
-  Maybe get rid of it before if the problem above is solved.
-**************************************************************************/
-static bool city_on_foreign_tile_is_legal(struct unit_type *punit_type)
-{
-  struct requirement tile_is_claimed;
-  struct requirement tile_is_foreign;
-
-  if (!utype_may_act_at_all(punit_type)) {
-    /* Not an actor unit type. */
+  if (!city_can_be_built_tile_only(ptile)) {
     return FALSE;
   }
 
-  /* Tile is claimed as a requirement. */
-  tile_is_claimed.range = REQ_RANGE_LOCAL;
-  tile_is_claimed.survives = FALSE;
-  tile_is_claimed.source.kind = VUT_CITYTILE;
-  tile_is_claimed.present = TRUE;
-  tile_is_claimed.source.value.citytile = CITYT_CLAIMED;
+  if (punit == NULL) {
+    /* The reamining checks tests if punit can found a city here */
+    return TRUE;
+  }
 
-  /* Tile is foreign as a requirement. */
-  tile_is_foreign.range = REQ_RANGE_LOCAL;
-  tile_is_foreign.survives = FALSE;
-  tile_is_foreign.source.kind = VUT_DIPLREL;
-  tile_is_foreign.present = TRUE;
-  tile_is_foreign.source.value.diplrel = DRO_FOREIGN;
-
-  action_enabler_list_iterate(
-        action_enablers_for_action(ACTION_FOUND_CITY), enabler) {
-    if (!requirement_fulfilled_by_unit_type(punit_type,
-                                            &(enabler->actor_reqs))) {
-      /* This action enabler isn't for this unit type at all. */
+  action_by_result_iterate(paction, act_id, ACTRES_FOUND_CITY) {
+    if (!utype_can_do_action(unit_type_get(punit), act_id)) {
+      /* This action can't be done by this unit type at all. */
       continue;
     }
 
-    if (!(does_req_contradicts_reqs(&tile_is_claimed,
-                                    &(enabler->target_reqs))
-          || does_req_contradicts_reqs(&tile_is_foreign,
-                                       &(enabler->actor_reqs)))) {
-      /* This ruleset permits city founding on foreign tiles. */
-      return TRUE;
+    /* Non native tile detection */
+    if (!can_unit_exist_at_tile(&(wld.map), punit, ptile)
+        /* The ruleset may allow founding cities on non native terrain. */
+        && !utype_can_do_act_when_ustate(unit_type_get(punit), paction->id,
+                                         USP_LIVABLE_TILE, FALSE)) {
+      /* Many rulesets allow land units to build land cities and sea units
+       * to build ocean cities. Air units can build cities anywhere. */
+      continue;
     }
-  } action_enabler_list_iterate_end;
 
-  /* This ruleset forbids city founding on foreign tiles. */
+    /* Foreign tile detection. */
+    if (tile_owner(ptile) && tile_owner(ptile) != unit_owner(punit)
+        /* The ruleset may allow founding cities on foreign terrain. */
+        && !can_utype_do_act_if_tgt_diplrel(unit_type_get(punit),
+                                            paction->id,
+                                            DRO_FOREIGN, TRUE)) {
+      /* Cannot steal borders by settling. This has to be settled by
+       * force of arms. */
+      continue;
+    }
+
+    return TRUE;
+  } action_by_result_iterate_end;
+
   return FALSE;
 }
 
 /**********************************************************************//**
-  Returns CB_OK if the given unit can build a city at the given map
-  coordinates. Else, returns the reason of the failure.
+  Returns TRUE if the given unit can build a city at the given map
+  coordinates.
 
-  punit is the founding unit. It may be NULL if a city is built out of the
-  blue (e.g., through editing).
+  It may still be illegal for any unit to build a city at the specified
+  tile.
 **************************************************************************/
-enum city_build_result city_build_here_test(const struct tile *ptile,
-                                            const struct unit *punit)
+bool city_can_be_built_tile_only(const struct tile *ptile)
 {
-  int citymindist;
-
   if (terrain_has_flag(tile_terrain(ptile), TER_NO_CITIES)) {
     /* No cities on this terrain. */
-    return CB_BAD_CITY_TERRAIN;
+    return FALSE;
   }
 
-  if (punit && !can_unit_exist_at_tile(&(wld.map), punit, ptile)
-      /* TODO: remove CB_BAD_UNIT_TERRAIN and CB_BAD_UNIT_TERRAIN when it
-       * can be done without regressions. */
-      /* The ruleset may allow founding cities on non native terrain. */
-      && !utype_can_do_act_when_ustate(unit_type_get(punit), ACTION_FOUND_CITY,
-                                       USP_LIVABLE_TILE, FALSE)) {
-    /* Many rulesets allow land units to build land cities and sea units to
-     * build ocean cities. Air units can build cities anywhere. */
-    return CB_BAD_UNIT_TERRAIN;
+  if (citymindist_prevents_city_on_tile(ptile)) {
+    return FALSE;
   }
 
-  if (punit && tile_owner(ptile) && tile_owner(ptile) != unit_owner(punit)
-      /* TODO: remove CB_BAD_BORDERS when it can be done without
-       * regressions. */
-      /* The ruleset may allow founding cities on foreign terrain. */
-      && !city_on_foreign_tile_is_legal(unit_type_get(punit))) {
-    /* Cannot steal borders by settling. This has to be settled by
-     * force of arms. */
-    return CB_BAD_BORDERS;
-  }
-
-  /* citymindist minimum is 1, meaning adjacent is okay */
-  citymindist = game.info.citymindist;
-  square_iterate(&(wld.map), ptile, citymindist - 1, ptile1) {
-    if (tile_city(ptile1)) {
-      return CB_NO_MIN_DIST;
-    }
-  } square_iterate_end;
-
-  return CB_OK;
+  return TRUE;
 }
 
 /**********************************************************************//**
@@ -1717,6 +1704,8 @@ void city_production_caravan_shields_init(void)
 {
   struct requirement prod_as_req;
 
+#define log_ca_s_init log_debug
+
   /* Remove old data. */
   BV_CLR_ALL(caravan_helped_impr);
   BV_CLR_ALL(caravan_helped_utype);
@@ -1730,11 +1719,6 @@ void city_production_caravan_shields_init(void)
   prod_as_req.source.kind = VUT_IMPROVEMENT;
 
   improvement_iterate(itype) {
-    if (!is_wonder(itype)) {
-      /* Only wonders can currently use caravan shields. Next! */
-      continue;
-    }
-
     /* Check this improvement. */
     prod_as_req.source.value.building = itype;
 
@@ -1742,7 +1726,11 @@ void city_production_caravan_shields_init(void)
                                   ACTION_HELP_WONDER),
                                 enabler) {
       if (!does_req_contradicts_reqs(&prod_as_req,
-                                     &(enabler->target_reqs))) {
+                                     &(enabler->target_reqs))
+          && !req_vec_wants_type(&(enabler->target_reqs), VUT_UTYPE)
+          && !req_vec_wants_type(&(enabler->target_reqs), VUT_UCLASS)
+          && !req_vec_wants_type(&(enabler->target_reqs), VUT_UTFLAG)
+          && !req_vec_wants_type(&(enabler->target_reqs), VUT_UCFLAG)) {
         /* This improvement kind can receive caravan shields. */
 
         BV_SET(caravan_helped_impr, improvement_index(itype));
@@ -1751,9 +1739,43 @@ void city_production_caravan_shields_init(void)
         break;
       }
     } action_enabler_list_iterate_end;
+
+    log_ca_s_init("Help Wonder: %s for %s",
+                  (BV_ISSET(caravan_helped_impr, improvement_index(itype))
+                   ? "possible" : "impossible"),
+                  improvement_rule_name(itype));
   } improvement_iterate_end;
 
-  /* Units can't currently use caravan shields. */
+  /* Check units. */
+  prod_as_req.source.kind = VUT_UTYPE;
+
+  unit_type_iterate(putype) {
+    /* Check this utype. */
+    prod_as_req.source.value.utype = putype;
+
+    action_enabler_list_iterate(action_enablers_for_action(
+                                  ACTION_HELP_WONDER),
+                                enabler) {
+      if (!does_req_contradicts_reqs(&prod_as_req,
+                                     &(enabler->target_reqs))
+          && !req_vec_wants_type(&(enabler->target_reqs), VUT_IMPROVEMENT)
+          && !req_vec_wants_type(&(enabler->target_reqs), VUT_IMPR_GENUS)) {
+        /* This unit type kind can receive caravan shields. */
+
+        BV_SET(caravan_helped_utype, utype_index(putype));
+
+        /* Move on to the next unit type */
+        break;
+      }
+    } action_enabler_list_iterate_end;
+
+    log_ca_s_init("Help Wonder: %s for %s",
+                  (BV_ISSET(caravan_helped_utype, utype_index(putype))
+                   ? "possible" : "impossible"),
+                  utype_rule_name(putype));
+  } unit_type_iterate_end;
+
+#undef log_ca_s_init
 }
 
 /**********************************************************************//**
@@ -2858,7 +2880,7 @@ inline void set_city_production(struct city *pcity)
 int city_unit_unhappiness(struct unit *punit, int *free_unhappy)
 {
   struct city *pcity;
-  struct unit_type *ut;
+  const struct unit_type *ut;
   struct player *plr;
   int happy_cost;
 
@@ -2927,7 +2949,7 @@ static inline void city_support(struct city *pcity)
   switch (game.info.gold_upkeep_style) {
   case GOLD_UPKEEP_CITY:
     pcity->usage[O_GOLD] += city_total_unit_gold_upkeep(pcity);
-    /* no break */
+    fc__fallthrough; /* No break */
   case GOLD_UPKEEP_MIXED:
     pcity->usage[O_GOLD] += city_total_impr_gold_upkeep(pcity);
     break;
@@ -3341,6 +3363,10 @@ void destroy_city_virtual(struct city *pcity)
   trade_route_list_destroy(pcity->routes);
   if (pcity->tile_cache != NULL) {
     free(pcity->tile_cache);
+  }
+
+  if (pcity->cm_parameter) {
+    free(pcity->cm_parameter);
   }
 
   if (!is_server()) {

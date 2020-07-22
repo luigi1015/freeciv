@@ -62,7 +62,7 @@ static int findfield (lua_State *L, int objidx, int level) {
       else if (findfield(L, objidx, level - 1)) {  /* try recursively */
         /* stack: lib_name, lib_table, field_name (top) */
         lua_pushliteral(L, ".");  /* place '.' between the two names */
-        lua_replace(L, -3);  /* (in the slot ocupied by table) */
+        lua_replace(L, -3);  /* (in the slot occupied by table) */
         lua_concat(L, 3);  /* lib_name.field_name */
         return 1;
       }
@@ -87,7 +87,7 @@ static int pushglobalfuncname (lua_State *L, lua_Debug *ar) {
       lua_remove(L, -2);  /* remove original name */
     }
     lua_copy(L, -1, top + 1);  /* copy name to proper place */
-    lua_settop(L, top + 1);  /* remove table "loaded" an name copy */
+    lua_settop(L, top + 1);  /* remove table "loaded" and name copy */
     return 1;
   }
   else {
@@ -249,7 +249,7 @@ LUALIB_API int luaL_fileresult (lua_State *L, int stat, const char *fname) {
     return 1;
   }
   else {
-    lua_pushnil(L);
+    luaL_pushfail(L);
     if (fname)
       lua_pushfstring(L, "%s: %s", fname, strerror(en));
     else
@@ -284,17 +284,17 @@ LUALIB_API int luaL_fileresult (lua_State *L, int stat, const char *fname) {
 
 LUALIB_API int luaL_execresult (lua_State *L, int stat) {
   const char *what = "exit";  /* type of termination */
-  if (stat == -1)  /* error? */
+  if (stat != 0 && errno != 0)  /* error with an 'errno'? */
     return luaL_fileresult(L, 0, NULL);
   else {
     l_inspectstat(stat, what);  /* interpret result */
     if (*what == 'e' && stat == 0)  /* successful termination? */
       lua_pushboolean(L, 1);
     else
-      lua_pushnil(L);
+      luaL_pushfail(L);
     lua_pushstring(L, what);
     lua_pushinteger(L, stat);
-    return 3;  /* return true/nil,what,code */
+    return 3;  /* return true/fail,what,code */
   }
 }
 
@@ -476,7 +476,7 @@ static void *resizebox (lua_State *L, int idx, size_t newsize) {
   UBox *box = (UBox *)lua_touserdata(L, idx);
   void *temp = allocf(ud, box->box, box->bsize, newsize);
   if (temp == NULL && newsize > 0)  /* allocation error? */
-    luaL_error(L, "not enough memory for buffer allocation");
+    luaL_error(L, "not enough memory");
   box->box = temp;
   box->bsize = newsize;
   return temp;
@@ -902,10 +902,10 @@ LUALIB_API const char *luaL_tolstring (lua_State *L, int idx, size_t *len) {
 LUALIB_API void luaL_setfuncs (lua_State *L, const luaL_Reg *l, int nup) {
   luaL_checkstack(L, nup, "too many upvalues");
   for (; l->name != NULL; l++) {  /* fill the table with given functions */
-    int i;
     if (l->func == NULL)  /* place holder? */
       lua_pushboolean(L, 0);
     else {
+      int i;
       for (i = 0; i < nup; i++)  /* copy upvalues to the top */
         lua_pushvalue(L, -nup);
       lua_pushcclosure(L, l->func, nup);  /* closure with those upvalues */
@@ -995,36 +995,52 @@ static void *l_alloc (void *ud, void *ptr, size_t osize, size_t nsize) {
 
 
 static int panic (lua_State *L) {
+  const char *msg = lua_tostring(L, -1);
+  if (msg == NULL) msg = "error object is not a string";
   lua_writestringerror("PANIC: unprotected error in call to Lua API (%s)\n",
-                        lua_tostring(L, -1));
+                        msg);
   return 0;  /* return to Lua to abort */
 }
 
 
 /*
-** Emit a warning. '*previoustocont' signals whether previous message
-** was to be continued by the current one.
+** Emit a warning. '*warnstate' means:
+** 0 - warning system is off;
+** 1 - ready to start a new message;
+** 2 - previous message is to be continued.
 */
 static void warnf (void *ud, const char *message, int tocont) {
-  int *previoustocont = (int *)ud;
-  if (!*previoustocont)  /* previous message was the last? */
+  int *warnstate = (int *)ud;
+  if (*warnstate != 2 && !tocont && *message == '@') {  /* control message? */
+    if (strcmp(message, "@off") == 0)
+      *warnstate = 0;
+    else if (strcmp(message, "@on") == 0)
+      *warnstate = 1;
+    return;
+  }
+  else if (*warnstate == 0)  /* warnings off? */
+    return;
+  if (*warnstate == 1)  /* previous message was the last? */
     lua_writestringerror("%s", "Lua warning: ");  /* start a new warning */
   lua_writestringerror("%s", message);  /* write message */
-  if (!tocont)  /* is this the last part? */
+  if (tocont)  /* not the last part? */
+    *warnstate = 2;  /* to be continued */
+  else {  /* last part */
     lua_writestringerror("%s", "\n");  /* finish message with end-of-line */
-  *previoustocont = tocont;
+    *warnstate = 1;  /* ready to start a new message */
+  }
 }
 
 
 LUALIB_API lua_State *luaL_newstate (void) {
   lua_State *L = lua_newstate(l_alloc, NULL);
   if (L) {
-    int *previoustocont;  /* space for warning state */
+    int *warnstate;  /* space for warning state */
     lua_atpanic(L, &panic);
-    previoustocont = (int *)lua_newuserdatauv(L, sizeof(int), 0);
+    warnstate = (int *)lua_newuserdatauv(L, sizeof(int), 0);
     luaL_ref(L, LUA_REGISTRYINDEX);  /* make sure it won't be collected */
-    *previoustocont = 0;  /* next message starts a new warning */
-    lua_setwarnf(L, warnf, previoustocont);
+    *warnstate = 0;  /* default is warnings off */
+    lua_setwarnf(L, warnf, warnstate);
   }
   return L;
 }

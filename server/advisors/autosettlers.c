@@ -75,7 +75,7 @@ struct settlermap {
 
 action_id as_actions_transform[MAX_NUM_ACTIONS];
 action_id as_actions_extra[MAX_NUM_ACTIONS];
-Activity_type_id as_activities_rmextra[ACTIVITY_LAST];
+action_id as_actions_rmextra[MAX_NUM_ACTIONS];
 
 static struct timer *as_timer = NULL;
 
@@ -89,29 +89,39 @@ void adv_settlers_free(void)
 }
 
 /**********************************************************************//**
-  Initialize advisor systems.
+  Initialize auto settlers based on the ruleset.
 **************************************************************************/
-void advisors_init(void)
+void auto_settlers_ruleset_init(void)
 {
-  int i = 0;
-
-  as_actions_transform[i++] = ACTION_CULTIVATE;
-  as_actions_transform[i++] = ACTION_PLANT;
-  as_actions_transform[i++] = ACTION_TRANSFORM_TERRAIN;
-  as_actions_transform[i++] = ACTION_NONE;
+  int i;
 
   i = 0;
-  as_actions_extra[i++] = ACTION_IRRIGATE;
-  as_actions_extra[i++] = ACTION_MINE;
-  as_actions_extra[i++] = ACTION_ROAD;
-  as_actions_extra[i++] = ACTION_BASE;
-  as_actions_extra[i++] = ACTION_NONE;
+  action_list_add_all_by_result(as_actions_transform, &i,
+                                ACTRES_CULTIVATE);
+  action_list_add_all_by_result(as_actions_transform, &i,
+                                ACTRES_PLANT);
+  action_list_add_all_by_result(as_actions_transform, &i,
+                                ACTRES_TRANSFORM_TERRAIN);
+  action_list_end(as_actions_transform, i);
 
   i = 0;
-  as_activities_rmextra[i++] = ACTIVITY_POLLUTION;
-  as_activities_rmextra[i++] = ACTIVITY_FALLOUT;
-  /* We could have ACTIVITY_PILLAGE here, but currently we don't */
-  as_activities_rmextra[i++] = ACTIVITY_LAST;
+  action_list_add_all_by_result(as_actions_extra, &i,
+                                ACTRES_IRRIGATE);
+  action_list_add_all_by_result(as_actions_extra, &i,
+                                ACTRES_MINE);
+  action_list_add_all_by_result(as_actions_extra, &i,
+                                ACTRES_ROAD);
+  action_list_add_all_by_result(as_actions_extra, &i,
+                                ACTRES_BASE);
+  action_list_end(as_actions_extra, i);
+
+  i = 0;
+  action_list_add_all_by_result(as_actions_rmextra, &i,
+                                ACTRES_CLEAN_POLLUTION);
+  action_list_add_all_by_result(as_actions_rmextra, &i,
+                                ACTRES_CLEAN_FALLOUT);
+  /* We could have ACTRES_PILLAGE here, but currently we don't */
+  action_list_end(as_actions_rmextra, i);
 }
 
 /**********************************************************************//**
@@ -572,22 +582,28 @@ adv_want settler_evaluate_improvements(struct unit *punit,
             bool removing = tile_has_extra(ptile, pextra);
 
             if (removing) {
-              as_rmextra_activity_iterate(try_act) {
-                if (is_extra_removed_by_action(pextra, try_act)) {
+              as_rmextra_action_iterate(try_act) {
+                struct action *taction = action_by_number(try_act);
+                if (is_extra_removed_by_action(pextra, taction)) {
                   /* We do not even evaluate actions we can't do.
                    * Removal is not considered prerequisite for anything */
-                  if (auto_settlers_speculate_can_act_at(punit, try_act,
-                          parameter.omniscience, pextra, ptile)) {
-                    act = try_act;
-                    eval_act = act;
+                  if (action_prob_possible(
+                        action_speculate_unit_on_tile(try_act,
+                                                      punit,
+                                                      unit_home(punit),
+                                                      ptile,
+                                                      parameter.omniscience,
+                                                      ptile, pextra))) {
+                    act = action_get_activity(taction);
+                    eval_act = action_get_activity(taction);
                     break;
                   }
                 }
-              } as_rmextra_activity_iterate_end;
+              } as_rmextra_action_iterate_end;
             } else {
               as_extra_action_iterate(try_act) {
-                if (is_extra_caused_by_action(pextra,
-                        action_id_get_activity(try_act))) {
+                struct action *taction = action_by_number(try_act);
+                if (is_extra_caused_by_action(pextra, taction)) {
                   eval_act = action_id_get_activity(try_act);
                   if (action_prob_possible(
                         action_speculate_unit_on_tile(try_act,
@@ -596,7 +612,7 @@ adv_want settler_evaluate_improvements(struct unit *punit,
                                                       ptile,
                                                       parameter.omniscience,
                                                       ptile, pextra))) {
-                    act = action_id_get_activity(try_act);
+                    act = action_get_activity(taction);
                     break;
                   }
                 }
@@ -1154,15 +1170,16 @@ void auto_settlers_player(struct player *pplayer)
    * auto-settle with a unit under orders even for an AI player - these come
    * from the human player and take precedence. */
   unit_list_iterate_safe(pplayer->units, punit) {
-    if ((punit->ai_controlled || is_ai(pplayer))
+    if ((punit->ssa_controller == SSA_AUTOSETTLER || is_ai(pplayer))
         && (unit_type_get(punit)->adv.worker
             || unit_is_cityfounder(punit))
         && !unit_has_orders(punit)
         && punit->moves_left > 0) {
-      log_debug("%s %s at (%d, %d) is ai controlled.",
+      log_debug("%s %s at (%d, %d) is controlled by server side agent %s.",
                 nation_rule_name(nation_of_player(pplayer)),
                 unit_rule_name(punit),
-                TILE_XY(unit_tile(punit)));
+                TILE_XY(unit_tile(punit)),
+                server_side_agent_name(SSA_AUTOSETTLER));
       if (punit->activity == ACTIVITY_SENTRY) {
         unit_activity_handling(punit, ACTIVITY_IDLE);
       }
@@ -1227,15 +1244,6 @@ void adv_unit_new_task(struct unit *punit, enum adv_unit_task task,
 /**********************************************************************//**
   Returns TRUE iff the unit can do the targeted activity at the given
   location.
-
-  Some activities aren't actions. They are therefore unable to use
-  action_speculate_*(). Activities that are actions will use the actor's
-  current tile when evaluating distance requirements etc if used with
-  can_unit_do_activity_targeted_at(). This makes them return the wrong
-  result. They must therefore use action_speculate_*(). Call the function
-  that gives the best speculative evaluation for the specified activity.
-
-  FIXME: Get rid of the need for this.
 **************************************************************************/
 bool auto_settlers_speculate_can_act_at(const struct unit *punit,
                                         enum unit_activity activity,
@@ -1243,123 +1251,57 @@ bool auto_settlers_speculate_can_act_at(const struct unit *punit,
                                         struct extra_type *target,
                                         const struct tile *ptile)
 {
-  struct terrain *pterrain = tile_terrain(ptile);
+  struct action *paction = NULL;
 
-  switch (activity) {
-  case ACTIVITY_MINE:
-    if (pterrain->mining_result != pterrain
-        && pterrain->mining_result != T_NONE) {
-      return action_prob_possible(action_speculate_unit_on_tile(
-                                    ACTION_PLANT,
-                                    punit, unit_home(punit), ptile,
-                                    omniscient_cheat,
-                                    ptile, target));
-    } else if (pterrain->mining_result == pterrain) {
-      return action_prob_possible(action_speculate_unit_on_tile(
-                                    ACTION_MINE,
-                                    punit, unit_home(punit), ptile,
-                                    omniscient_cheat,
-                                    ptile, target));
-    } else {
-      return FALSE;
+  action_iterate(act_id) {
+    paction = action_by_number(act_id);
+
+    if (action_get_actor_kind(paction) != AAK_UNIT) {
+      /* Not relevant. */
+      continue;
     }
 
-  case ACTIVITY_PLANT:
-    if (pterrain->mining_result != pterrain
-        && pterrain->mining_result != T_NONE) {
-      return action_prob_possible(action_speculate_unit_on_tile(
-                                    ACTION_PLANT,
-                                    punit, unit_home(punit), ptile,
-                                    omniscient_cheat,
-                                    ptile, target));
-    } else {
-      return FALSE;
+    if (action_get_activity(paction) == activity) {
+      /* Found one */
+      break;
     }
+  } action_iterate_end;
 
-  case ACTIVITY_IRRIGATE:
-    if (pterrain->irrigation_result != pterrain
-        && pterrain->irrigation_result != T_NONE) {
-      return action_prob_possible(action_speculate_unit_on_tile(
-                                    ACTION_CULTIVATE,
-                                    punit, unit_home(punit), ptile,
-                                    omniscient_cheat,
-                                    ptile, target));
-    } else if (pterrain->irrigation_result == pterrain) {
-      return action_prob_possible(action_speculate_unit_on_tile(
-                                    ACTION_IRRIGATE,
-                                    punit, unit_home(punit), ptile,
-                                    omniscient_cheat,
-                                    ptile, target));
-    } else {
-      return FALSE;
-    }
+  if (paction == NULL) {
+    /* The action it self isn't there. It can't be enabled. */
+    return FALSE;
+  }
 
-  case ACTIVITY_CULTIVATE:
-    if (pterrain->irrigation_result != pterrain
-        && pterrain->irrigation_result != T_NONE) {
-      return action_prob_possible(action_speculate_unit_on_tile(
-                                    ACTION_CULTIVATE,
-                                    punit, unit_home(punit), ptile,
-                                    omniscient_cheat,
-                                    ptile, target));
-    } else {
-      return FALSE;
-    }
-
-  case ACTIVITY_FORTIFYING:
+  switch (action_get_target_kind(paction)) {
+  case ATK_CITY:
+    return action_prob_possible(action_speculate_unit_on_city(
+                                  paction->id,
+                                  punit, unit_home(punit), ptile,
+                                  omniscient_cheat,
+                                  tile_city(ptile)));
+  case ATK_UNIT:
+    fc_assert_ret_val(action_get_target_kind(paction) != ATK_UNIT, FALSE);
+    break;
+  case ATK_UNITS:
+    return action_prob_possible(action_speculate_unit_on_units(
+                                  paction->id,
+                                  punit, unit_home(punit), ptile,
+                                  omniscient_cheat,
+                                  ptile));
+  case ATK_TILE:
+    return action_prob_possible(action_speculate_unit_on_tile(
+                                  paction->id,
+                                  punit, unit_home(punit), ptile,
+                                  omniscient_cheat,
+                                  ptile, target));
+  case ATK_SELF:
     return action_prob_possible(action_speculate_unit_on_self(
-                                  ACTION_FORTIFY,
+                                  paction->id,
                                   punit, unit_home(punit), ptile,
                                   omniscient_cheat));
-
-  case ACTIVITY_BASE:
-    return action_prob_possible(action_speculate_unit_on_tile(
-                                  ACTION_BASE,
-                                  punit, unit_home(punit), ptile,
-                                  omniscient_cheat,
-                                  ptile, target));
-
-  case ACTIVITY_GEN_ROAD:
-    return action_prob_possible(action_speculate_unit_on_tile(
-                                  ACTION_ROAD,
-                                  punit, unit_home(punit), ptile,
-                                  omniscient_cheat,
-                                  ptile, target));
-
-  case ACTIVITY_PILLAGE:
-    return action_prob_possible(action_speculate_unit_on_tile(
-                                  ACTION_PILLAGE,
-                                  punit, unit_home(punit), ptile,
-                                  omniscient_cheat,
-                                  ptile, target));
-
-  case ACTIVITY_TRANSFORM:
-    return action_prob_possible(action_speculate_unit_on_tile(
-                                  ACTION_TRANSFORM_TERRAIN,
-                                  punit, unit_home(punit), ptile,
-                                  omniscient_cheat,
-                                  ptile, target));
-
-  case ACTIVITY_CONVERT:
-    return action_prob_possible(action_speculate_unit_on_self(
-                                  ACTION_CONVERT,
-                                  punit, unit_home(punit), ptile,
-                                  omniscient_cheat));
-  case ACTIVITY_IDLE:
-  case ACTIVITY_GOTO:
-  case ACTIVITY_POLLUTION:
-  case ACTIVITY_FALLOUT:
-  case ACTIVITY_FORTIFIED:
-  case ACTIVITY_SENTRY:
-  case ACTIVITY_EXPLORE:
-  case ACTIVITY_OLD_ROAD:
-  case ACTIVITY_OLD_RAILROAD:
-  case ACTIVITY_FORTRESS:
-  case ACTIVITY_AIRBASE:
-  case ACTIVITY_PATROL_UNUSED:
-  case ACTIVITY_LAST:
-  case ACTIVITY_UNKNOWN:
-    return can_unit_do_activity_targeted_at(punit, activity, target, ptile);
+  case ATK_COUNT:
+    fc_assert_ret_val(action_get_target_kind(paction) != ATK_COUNT, FALSE);
+    break;
   }
 
   fc_assert(FALSE);

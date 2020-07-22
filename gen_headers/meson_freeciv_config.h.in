@@ -17,11 +17,18 @@
  * other autotools projects. This is meant to be usable for external
  * projects building against some freeciv components. */
 
+/* This header file is shipped in some binary distributions.
+ * It is included purely for reference as to how the executables were built,
+ * and changing it will have no functional effect on pre-built binaries. */
+
 #ifndef FC__FREECIV_CONFIG_H
 #define FC__FREECIV_CONFIG_H
 
 /* Use pthreads as thread implementation */
-#define FREECIV_HAVE_PTHREAD
+#mesondefine FREECIV_HAVE_PTHREAD
+
+/* Use tinycthread as thread implementation */
+#mesondefine FREECIV_HAVE_TINYCTHR
 
 /* Has thread condition variable implementation */
 #define FREECIV_HAVE_THREAD_COND
@@ -40,8 +47,17 @@
 /* IPv6 Support built in */
 #define FREECIV_IPV6_SUPPORT
 
+/* MS Windows host */
+#mesondefine FREECIV_MSWINDOWS
+
+/* mkstemp() available */
+#define HAVE_MKSTEMP
+
 /* Produce debug version */
 #mesondefine FREECIV_DEBUG
+
+/* Winsock available */
+#mesondefine FREECIV_HAVE_WINSOCK
 
 /* locale.h available */
 #mesondefine FREECIV_HAVE_LOCALE_H
@@ -81,5 +97,21 @@
 
 /* stdbool.h available */
 #mesondefine FREECIV_HAVE_STDBOOL_H
+
+/* Readline support */
+#mesondefine FREECIV_HAVE_LIBREADLINE
+
+/* winsock2.h available */
+#mesondefine FREECIV_HAVE_WINSOCK2_H
+
+#ifdef FREECIV_HAVE_WINSOCK2_H
+#define FREECIV_HAVE_WINSOCK2 1
+#endif
+
+/* jansson network protocol in use */
+#mesondefine FREECIV_JSON_CONNECTION
+
+/* Json Connection TCP Port; Default of the raw-protocol + 1000 */
+#define FREECIV_JSON_PORT 6556
 
 #endif /* FC__FREECIV_CONFIG_H */

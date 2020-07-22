@@ -117,6 +117,11 @@ struct loaddata {
     enum action_decision *order;
     size_t size;
   } act_dec;
+  /* loaded in sg_load_savefile(); needed in sg_load_player_unit(), ... */
+  struct {
+    enum server_side_agent *order;
+    size_t size;
+  } ssa;
 
   /* loaded in sg_load_game(); needed in sg_load_random(), ... */
   enum server_states server_state;
@@ -168,6 +173,8 @@ struct loaddata {
   }
 
 void sg_load_compat(struct loaddata *loading, enum sgf_version format_class);
+void sg_load_post_load_compat(struct loaddata *loading,
+                              enum sgf_version format_class);
 int current_compat_ver(void);
 
 #define hex_chars "0123456789abcdef"
@@ -175,7 +182,6 @@ int current_compat_ver(void);
 char bin2ascii_hex(int value, int halfbyte_wanted);
 int ascii_hex2bin(char ch, int halfbyte);
 
-char num2char(unsigned int num);
 int char2num(char ch);
 
 enum tile_special_type special_by_rule_name(const char *name);
@@ -186,6 +192,9 @@ struct extra_type *resource_by_identifier(const char identifier);
 
 enum ai_level ai_level_convert(int old_level);
 enum barbarian_type barb_type_convert(int old_type);
+
+void set_unit_activity_base(struct unit *punit, Base_type_id base);
+void set_unit_activity_road(struct unit *punit, Road_type_id road);
 
 #define ORDER_OLD_BUILD_CITY (-1)
 #define ORDER_OLD_DISBAND (-2)

@@ -57,6 +57,8 @@ struct tile {
   struct unit_list *units;
   struct city *worked;			/* NULL for not worked */
   struct player *owner;			/* NULL for not owned */
+  struct extra_type *placing;
+  int infra_turns;
   struct player *extras_owner;
   struct tile *claimer;
   char *label;                          /* NULL for no label */
@@ -121,8 +123,6 @@ static inline const bv_extras *tile_extras(const struct tile *ptile)
 
 void tile_set_bases(struct tile *ptile, bv_bases bases);
 bool tile_has_base(const struct tile *ptile, const struct base_type *pbase);
-void tile_add_base(struct tile *ptile, const struct base_type *pbase);
-void tile_remove_base(struct tile *ptile, const struct base_type *pbase);
 bool tile_has_base_flag(const struct tile *ptile, enum base_flag_id flag);
 bool tile_has_base_flag_for_unit(const struct tile *ptile,
                                  const struct unit_type *punittype,
@@ -139,8 +139,6 @@ int tile_extras_class_defense_bonus(const struct tile *ptile,
                                     const struct unit_class *pclass);
 
 bool tile_has_road(const struct tile *ptile, const struct road_type *proad);
-void tile_add_road(struct tile *ptile, const struct road_type *proad);
-void tile_remove_road(struct tile *ptile, const struct road_type *proad);
 bool tile_has_road_flag(const struct tile *ptile, enum road_flag_id flag);
 int tile_roads_output_incr(const struct tile *ptile, enum output_type_id o);
 int tile_roads_output_bonus(const struct tile *ptile, enum output_type_id o);
@@ -169,7 +167,7 @@ bool tile_is_seen(const struct tile *target_tile,
 #define ACTIVITY_FACTOR 10
 int tile_activity_time(enum unit_activity activity,
 		       const struct tile *ptile,
-                       struct extra_type *tgt);
+                       const struct extra_type *tgt);
 
 /* These are higher-level functions that handle side effects on the tile. */
 void tile_change_terrain(struct tile *ptile, struct terrain *pterrain);
@@ -190,6 +188,8 @@ bool tile_virtual_check(struct tile *vtile);
 void *tile_hash_key(const struct tile *ptile);
 
 bool tile_set_label(struct tile *ptile, const char *label);
+
+bool tile_is_placing(const struct tile *ptile);
 
 #ifdef __cplusplus
 }

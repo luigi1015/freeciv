@@ -113,6 +113,15 @@ format_version=20
 ;
 ; */ <-- avoid gettext warnings
 
+[advance_agriculture]
+name        = _("Agriculture");
+req1        = "Tools"
+req2        = "None"
+flags       = ""
+graphic     = "a.agriculture"
+graphic_alt = "-"
+helptext    = _("Agriculture allows placing irrigation.")
+
 [advance_carving]
 name        = _("Carving");
 req1        = "Tools"
@@ -159,4 +168,5 @@ req2        = "None"
 flags       = ""
 graphic     = "a.tools"
 graphic_alt = "-"
-helptext    = _("Anything can be done with right tools.");
+helptext    = _("Anything can be done with right tools.\
+ Allows more efficient use of production resources.");

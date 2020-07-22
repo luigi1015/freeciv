@@ -337,7 +337,7 @@ GtkWidget *create_main_page(void)
   gtk_grid_attach(GTK_GRID(table), button, 1, 1, 1, 1);
   g_signal_connect(button, "clicked", open_settings, NULL);
 
-  button = icon_label_button_new("application-exit", _("Exit"));
+  button = icon_label_button_new("application-exit", _("E_xit"));
   gtk_size_group_add_widget(size, button);
   g_object_unref(size);
   gtk_grid_attach(GTK_GRID(table), button, 1, 2, 1, 1);
@@ -450,9 +450,9 @@ static void save_dialog_file_chooser_popup(const char *title,
 
   /* Create the chooser */
   filechoose = gtk_file_chooser_dialog_new(title, GTK_WINDOW(toplevel), action,
-                                           _("Cancel"), GTK_RESPONSE_CANCEL,
+                                           _("_Cancel"), GTK_RESPONSE_CANCEL,
                                            (action == GTK_FILE_CHOOSER_ACTION_SAVE) ?
-                                           _("Save") : _("Open"),
+                                           _("_Save") : _("_Open"),
                                            GTK_RESPONSE_OK, NULL);
   setup_dialog(filechoose, toplevel);
   gtk_window_set_position(GTK_WINDOW(filechoose), GTK_WIN_POS_MOUSE);
@@ -497,7 +497,7 @@ static void save_dialog_response_callback(GtkWidget *w, gint response,
     return;
   case SD_RES_SAVE:
     {
-      const char *text = gtk_entry_get_text(pdialog->entry);
+      const char *text = gtk_entry_buffer_get_text(gtk_entry_get_buffer(pdialog->entry));
       gchar *filename = g_filename_from_utf8(text, -1, NULL, NULL, NULL);
 
       if (NULL == filename) {
@@ -550,7 +550,7 @@ static void save_dialog_list_callback(GtkTreeSelection *selection,
 
   gtk_dialog_set_response_sensitive(pdialog->shell, SD_RES_DELETE, TRUE);
   gtk_tree_model_get(model, &iter, SD_COL_PRETTY_NAME, &filename, -1);
-  gtk_entry_set_text(pdialog->entry, filename);
+  gtk_entry_buffer_set_text(gtk_entry_get_buffer(pdialog->entry), filename, -1);
 }
 
 /**********************************************************************//**
@@ -579,9 +579,9 @@ static GtkWidget *save_dialog_new(const char *title, const char *savelabel,
   /* Shell. */
   shell = gtk_dialog_new_with_buttons(title, NULL, 0,
                                       _("_Browse..."), SD_RES_BROWSE,
-                                      _("Delete"), SD_RES_DELETE,
-                                      _("Cancel"), GTK_RESPONSE_CANCEL,
-                                      _("Save"), SD_RES_SAVE,
+                                      _("_Delete"), SD_RES_DELETE,
+                                      _("_Cancel"), GTK_RESPONSE_CANCEL,
+                                      _("_Save"), SD_RES_SAVE,
                                       NULL);
   g_object_set_data_full(G_OBJECT(shell), "save_dialog", pdialog,
                          (GDestroyNotify) free);
@@ -715,8 +715,8 @@ static void update_server_list(enum server_scan_type sstype,
     return;
   }
 
-  host = gtk_entry_get_text(GTK_ENTRY(network_host));
-  portstr = gtk_entry_get_text(GTK_ENTRY(network_port));
+  host = gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(network_host)));
+  portstr = gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(network_port)));
   port = atoi(portstr);
 
   server_list_iterate(list, pserver) {
@@ -914,8 +914,10 @@ static void set_connection_state(enum connection_state state)
   case LOGIN_TYPE:
     append_network_statusbar("", FALSE);
 
-    gtk_entry_set_text(GTK_ENTRY(network_password), "");
-    gtk_entry_set_text(GTK_ENTRY(network_confirm_password), "");
+    gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(network_password)),
+                              "", -1);
+    gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(network_confirm_password)),
+                              "", -1);
 
     gtk_widget_set_sensitive(network_host, TRUE);
     gtk_widget_set_sensitive(network_port, TRUE);
@@ -928,8 +930,9 @@ static void set_connection_state(enum connection_state state)
     break;
   case NEW_PASSWORD_TYPE:
     set_client_page(PAGE_NETWORK);
-    gtk_entry_set_text(GTK_ENTRY(network_password), "");
-    gtk_entry_set_text(GTK_ENTRY(network_confirm_password), "");
+    gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(network_password)), "", -1);
+    gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(network_confirm_password)),
+                              "", -1);
 
     gtk_widget_set_sensitive(network_host, FALSE);
     gtk_widget_set_sensitive(network_port, FALSE);
@@ -944,8 +947,9 @@ static void set_connection_state(enum connection_state state)
     break;
   case ENTER_PASSWORD_TYPE:
     set_client_page(PAGE_NETWORK);
-    gtk_entry_set_text(GTK_ENTRY(network_password), "");
-    gtk_entry_set_text(GTK_ENTRY(network_confirm_password), "");
+    gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(network_password)), "", -1);
+    gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(network_confirm_password)),
+                              "", -1);
 
     gtk_widget_set_sensitive(network_host, FALSE);
     gtk_widget_set_sensitive(network_port, FALSE);
@@ -1028,9 +1032,11 @@ static void connect_callback(GtkWidget *w, gpointer data)
 
   switch (connection_status) {
   case LOGIN_TYPE:
-    sz_strlcpy(user_name, gtk_entry_get_text(GTK_ENTRY(network_login)));
-    sz_strlcpy(server_host, gtk_entry_get_text(GTK_ENTRY(network_host)));
-    server_port = atoi(gtk_entry_get_text(GTK_ENTRY(network_port)));
+    sz_strlcpy(user_name,
+               gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(network_login))));
+    sz_strlcpy(server_host,
+               gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(network_host))));
+    server_port = atoi(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(network_port))));
   
     if (connect_to_server(user_name, server_host, server_port,
                           errbuf, sizeof(errbuf)) != -1) {
@@ -1043,9 +1049,9 @@ static void connect_callback(GtkWidget *w, gpointer data)
   case NEW_PASSWORD_TYPE:
     if (w != network_password) {
       sz_strlcpy(password,
-	  gtk_entry_get_text(GTK_ENTRY(network_password)));
+          gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(network_password))));
       sz_strlcpy(reply.password,
-	  gtk_entry_get_text(GTK_ENTRY(network_confirm_password)));
+          gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(network_confirm_password))));
       if (strncmp(reply.password, password, MAX_LEN_NAME) == 0) {
 	password[0] = '\0';
 	send_packet_authentication_reply(&client.conn, &reply);
@@ -1061,7 +1067,7 @@ static void connect_callback(GtkWidget *w, gpointer data)
     return;
   case ENTER_PASSWORD_TYPE:
     sz_strlcpy(reply.password,
-	gtk_entry_get_text(GTK_ENTRY(network_password)));
+               gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(network_password))));
     send_packet_authentication_reply(&client.conn, &reply);
 
     set_connection_state(WAITING_TYPE);
@@ -1142,6 +1148,7 @@ static void network_list_callback(GtkTreeSelection *select, gpointer data)
     }
     if (srvrs->servers && path) {
       gint pos = gtk_tree_path_get_indices(path)[0];
+
       pserver = server_list_get(srvrs->servers, pos);
     }
     if (!holding_srv_list_mutex) {
@@ -1154,9 +1161,9 @@ static void network_list_callback(GtkTreeSelection *select, gpointer data)
 
   gtk_tree_model_get(model, &it, 0, &host, 1, &port, -1);
 
-  gtk_entry_set_text(GTK_ENTRY(network_host), host);
+  gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(network_host)), host, -1);
   fc_snprintf(portstr, sizeof(portstr), "%d", port);
-  gtk_entry_set_text(GTK_ENTRY(network_port), portstr);
+  gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(network_port)), portstr, -1);
 }
 
 /**********************************************************************//**
@@ -1169,10 +1176,10 @@ static void update_network_page(void)
   gtk_tree_selection_unselect_all(lan_selection);
   gtk_tree_selection_unselect_all(meta_selection);
 
-  gtk_entry_set_text(GTK_ENTRY(network_login), user_name);
-  gtk_entry_set_text(GTK_ENTRY(network_host), server_host);
+  gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(network_login)), user_name, -1);
+  gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(network_host)), server_host, -1);
   fc_snprintf(buf, sizeof(buf), "%d", server_port);
-  gtk_entry_set_text(GTK_ENTRY(network_port), buf);
+  gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(network_port)), buf, -1);
 }
 
 /**********************************************************************//**
@@ -1414,19 +1421,17 @@ GtkWidget *create_network_page(void)
   gtk_container_add(GTK_CONTAINER(hbox), sw);
 
 
-  bbox = gtk_button_box_new(GTK_ORIENTATION_HORIZONTAL);
+  bbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
   g_object_set(bbox, "margin", 2, NULL);
-  gtk_button_box_set_layout(GTK_BUTTON_BOX(bbox), GTK_BUTTONBOX_END);
   gtk_box_set_spacing(GTK_BOX(bbox), 12);
   gtk_container_add(GTK_CONTAINER(sbox), bbox);
 
   button = gtk_button_new_from_icon_name("view-refresh");
   gtk_container_add(GTK_CONTAINER(bbox), button);
-  gtk_button_box_set_child_secondary(GTK_BUTTON_BOX(bbox), button, TRUE);
   g_signal_connect(button, "clicked",
       G_CALLBACK(update_network_lists), NULL);
 
-  button = gtk_button_new_with_label(_("Cancel"));
+  button = gtk_button_new_with_mnemonic(_("_Cancel"));
   gtk_container_add(GTK_CONTAINER(bbox), button);
   g_signal_connect(button, "clicked",
                    G_CALLBACK(main_callback), NULL);
@@ -2810,7 +2815,7 @@ GtkWidget *create_start_page(void)
   toolkit_view = inputline_toolkit_view_new();
   gtk_container_add(GTK_CONTAINER(box), toolkit_view);
 
-  button = gtk_button_new_with_label(_("Cancel"));
+  button = gtk_button_new_with_mnemonic(_("_Cancel"));
   inputline_toolkit_view_append_button(toolkit_view, button);
   g_signal_connect(button, "clicked", G_CALLBACK(main_callback), NULL);
 
@@ -2958,24 +2963,22 @@ GtkWidget *create_load_page(void)
   gtk_container_add(GTK_CONTAINER(sw), view);
   gtk_container_add(GTK_CONTAINER(sbox), sw);
 
-  bbox = gtk_button_box_new(GTK_ORIENTATION_HORIZONTAL);
+  bbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
   gtk_widget_set_hexpand(bbox, TRUE);
-  gtk_button_box_set_layout(GTK_BUTTON_BOX(bbox), GTK_BUTTONBOX_END);
   gtk_box_set_spacing(GTK_BOX(bbox), 12);
   gtk_container_add(GTK_CONTAINER(box), bbox);
 
   button = gtk_button_new_with_mnemonic(_("_Browse..."));
   gtk_container_add(GTK_CONTAINER(bbox), button);
-  gtk_button_box_set_child_secondary(GTK_BUTTON_BOX(bbox), button, TRUE);
   g_signal_connect(button, "clicked",
                    G_CALLBACK(load_browse_callback), NULL);
 
-  button = gtk_button_new_with_label(_("Cancel"));
+  button = gtk_button_new_with_mnemonic(_("_Cancel"));
   gtk_container_add(GTK_CONTAINER(bbox), button);
   g_signal_connect(button, "clicked",
                    G_CALLBACK(main_callback), NULL);
 
-  button = gtk_button_new_with_label(_("OK"));
+  button = gtk_button_new_with_mnemonic(_("_OK"));
   gtk_container_add(GTK_CONTAINER(bbox), button);
   g_signal_connect(button, "clicked",
                    G_CALLBACK(load_callback), NULL);
@@ -3302,23 +3305,21 @@ GtkWidget *create_scenario_page(void)
   gtk_container_add(GTK_CONTAINER(descbox), versionbox);
   gtk_grid_attach(GTK_GRID(sbox), descbox, 1, 0, 1, 2);
 
-  bbox = gtk_button_box_new(GTK_ORIENTATION_HORIZONTAL);
-  gtk_button_box_set_layout(GTK_BUTTON_BOX(bbox), GTK_BUTTONBOX_END);
+  bbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
   gtk_box_set_spacing(GTK_BOX(bbox), 12);
   gtk_container_add(GTK_CONTAINER(vbox), bbox);
 
   button = gtk_button_new_with_mnemonic(_("_Browse..."));
   gtk_container_add(GTK_CONTAINER(bbox), button);
-  gtk_button_box_set_child_secondary(GTK_BUTTON_BOX(bbox), button, TRUE);
   g_signal_connect(button, "clicked",
       G_CALLBACK(scenario_browse_callback), NULL);
 
-  button = gtk_button_new_with_label(_("Cancel"));
+  button = gtk_button_new_with_mnemonic(_("_Cancel"));
   gtk_container_add(GTK_CONTAINER(bbox), button);
   g_signal_connect(button, "clicked",
                    G_CALLBACK(main_callback), NULL);
 
-  button = gtk_button_new_with_label(_("OK"));
+  button = gtk_button_new_with_mnemonic(_("_OK"));
   gtk_container_add(GTK_CONTAINER(bbox), button);
   g_signal_connect(button, "clicked",
                    G_CALLBACK(scenario_callback), NULL);

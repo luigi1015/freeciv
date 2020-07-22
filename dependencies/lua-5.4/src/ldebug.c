@@ -31,7 +31,7 @@
 
 
 
-#define noLuaClosure(f)		((f) == NULL || (f)->c.tt == LUA_TCCL)
+#define noLuaClosure(f)		((f) == NULL || (f)->c.tt == LUA_VCCL)
 
 
 /* Active Lua function (given call info) */
@@ -101,19 +101,21 @@ int luaG_getfuncline (const Proto *f, int pc) {
 }
 
 
-static int currentline (CallInfo *ci) {
+static int getcurrentline (CallInfo *ci) {
   return luaG_getfuncline(ci_func(ci)->p, currentpc(ci));
 }
 
 
 /*
-** This function can be called asynchronously (e.g. during a signal),
-** under "reasonable" assumptions. A new 'ci' is completely linked
-** in the list before it becomes part of the "active" list, and
-** we assume that pointers are atomic (see comment in next function).
-** (If we traverse one more item, there is no problem. If we traverse
-** one less item, the worst that can happen is that the signal will
-** not interrupt the script.)
+** Set 'trap' for all active Lua frames.
+** This function can be called during a signal, under "reasonable"
+** assumptions. A new 'ci' is completely linked in the list before it
+** becomes part of the "active" list, and we assume that pointers are
+** atomic; see comment in next function.
+** (A compiler doing interprocedural optimizations could, theoretically,
+** reorder memory writes in such a way that the list could be
+** temporarily broken while inserting a new element. We simply assume it
+** has no good reasons to do that.)
 */
 static void settraps (CallInfo *ci) {
   for (; ci != NULL; ci = ci->previous)
@@ -123,8 +125,8 @@ static void settraps (CallInfo *ci) {
 
 
 /*
-** This function can be called asynchronously (e.g. during a signal),
-** under "reasonable" assumptions.
+** This function can be called during a signal, under "reasonable"
+** assumptions.
 ** Fields 'oldpc', 'basehookcount', and 'hookcount' (set by
 ** 'resethookcount') are for debug only, and it is no problem if they
 ** get arbitrary values (causes at most one wrong hook call). 'hookmask'
@@ -306,7 +308,7 @@ static void collectvalidlines (lua_State *L, Closure *f) {
     Table *t = luaH_new(L);  /* new table to store active lines */
     sethvalue2s(L, L->top, t);  /* push it on stack */
     api_incr_top(L);
-    setbvalue(&v, 1);  /* boolean 'true' to be the value of all indices */
+    setbtvalue(&v);  /* boolean 'true' to be the value of all indices */
     for (i = 0; i < p->sizelineinfo; i++) {  /* for all lines with code */
       currentline = nextline(p, currentline, i);
       luaH_setint(L, t, currentline, &v);  /* table[line] = true */
@@ -339,7 +341,7 @@ static int auxgetinfo (lua_State *L, const char *what, lua_Debug *ar,
         break;
       }
       case 'l': {
-        ar->currentline = (ci && isLua(ci)) ? currentline(ci) : -1;
+        ar->currentline = (ci && isLua(ci)) ? getcurrentline(ci) : -1;
         break;
       }
       case 'u': {
@@ -465,12 +467,14 @@ static int filterpc (int pc, int jmptarget) {
 
 
 /*
-** try to find last instruction before 'lastpc' that modified register 'reg'
+** Try to find last instruction before 'lastpc' that modified register 'reg'.
 */
 static int findsetreg (const Proto *p, int lastpc, int reg) {
   int pc;
   int setreg = -1;  /* keep last instruction that changed 'reg' */
   int jmptarget = 0;  /* any code before this address is conditional */
+  if (testMMMode(GET_OPCODE(p->code[lastpc])))
+    lastpc--;  /* previous instruction was not actually executed */
   for (pc = 0; pc < lastpc; pc++) {
     Instruction i = p->code[pc];
     OpCode op = GET_OPCODE(i);
@@ -620,24 +624,8 @@ static const char *funcnamefromcode (lua_State *L, CallInfo *ci,
     case OP_SETTABUP: case OP_SETTABLE: case OP_SETI: case OP_SETFIELD:
       tm = TM_NEWINDEX;
       break;
-    case OP_ADDI: case OP_SUBI: case OP_MULI: case OP_MODI:
-    case OP_POWI: case OP_DIVI: case OP_IDIVI: {
-      int offset = GET_OPCODE(i) - OP_ADDI;  /* ORDER OP */
-      tm = cast(TMS, offset + TM_ADD);  /* ORDER TM */
-      break;
-    }
-    case OP_ADDK: case OP_SUBK: case OP_MULK: case OP_MODK:
-    case OP_POWK: case OP_DIVK: case OP_IDIVK:
-    case OP_BANDK: case OP_BORK: case OP_BXORK: {
-      int offset = GET_OPCODE(i) - OP_ADDK;  /* ORDER OP */
-      tm = cast(TMS, offset + TM_ADD);  /* ORDER TM */
-      break;
-    }
-    case OP_ADD: case OP_SUB: case OP_MUL: case OP_MOD:
-    case OP_POW: case OP_DIV: case OP_IDIV: case OP_BAND:
-    case OP_BOR: case OP_BXOR: case OP_SHL: case OP_SHR: {
-      int offset = GET_OPCODE(i) - OP_ADD;  /* ORDER OP */
-      tm = cast(TMS, offset + TM_ADD);  /* ORDER TM */
+    case OP_MMBIN: case OP_MMBINI: case OP_MMBINK: {
+      tm = cast(TMS, GETARG_C(i));
       break;
     }
     case OP_UNM: tm = TM_UNM; break;
@@ -648,8 +636,8 @@ static const char *funcnamefromcode (lua_State *L, CallInfo *ci,
     case OP_LT: case OP_LE: case OP_LTI: case OP_LEI:
       *name = "order";  /* '<=' can call '__lt', etc. */
       return "metamethod";
-    case OP_SHRI: case OP_SHLI:
-      *name = "shift";
+    case OP_CLOSE: case OP_RETURN:
+      *name = "close";
       return "metamethod";
     default:
       return NULL;  /* cannot find a reasonable name */
@@ -789,7 +777,7 @@ l_noret luaG_runerror (lua_State *L, const char *fmt, ...) {
   msg = luaO_pushvfstring(L, fmt, argp);  /* format message */
   va_end(argp);
   if (isLua(ci))  /* if Lua function, add source:line information */
-    luaG_addinfo(L, msg, ci_func(ci)->p->source, currentline(ci));
+    luaG_addinfo(L, msg, ci_func(ci)->p->source, getcurrentline(ci));
   luaG_errormsg(L);
 }
 

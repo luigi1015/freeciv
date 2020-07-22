@@ -32,6 +32,7 @@
 #include "fcintl.h"
 #include "log.h"
 #include "mem.h"
+#include "rand.h"
 #include "registry.h"
 #include "support.h"            /* fc__attribute, bool type, etc. */
 #include "timing.h"
@@ -156,9 +157,11 @@ static bool fcdb_command(struct connection *caller, char *arg, bool check);
 static const char *fcdb_accessor(int i);
 static char setting_status(struct connection *caller,
                            const struct setting *pset);
-static bool player_name_check(const char* name, char *buf, size_t buflen);
+static bool player_name_check(const char *name, char *buf, size_t buflen);
 static bool playercolor_command(struct connection *caller,
                                 char *str, bool check);
+static bool playernation_command(struct connection *caller,
+                                 char *str, bool check);
 static bool mapimg_command(struct connection *caller, char *arg, bool check);
 static const char *mapimg_accessor(int i);
 
@@ -180,7 +183,7 @@ static bool is_restricted(struct connection *caller)
   Check the player name. Returns TRUE if the player name is valid else
   an error message is saved in 'buf'.
 **************************************************************************/
-static bool player_name_check(const char* name, char *buf, size_t buflen)
+static bool player_name_check(const char *name, char *buf, size_t buflen)
 {
   size_t len = strlen(name);
 
@@ -1223,6 +1226,17 @@ static bool read_init_script_real(struct connection *caller,
     }
     return FALSE;
   }
+}
+
+/**********************************************************************//**
+  Return a list of init scripts found on the data path.
+  Caller should free.
+  These are conventionally scripts that load rulesets (generally
+  containing just a 'rulesetdir' command).
+**************************************************************************/
+struct strvec *get_init_script_choices(void)
+{
+  return fileinfolist(get_data_dirs(), RULESET_SUFFIX);
 }
 
 /**********************************************************************//**
@@ -2404,6 +2418,7 @@ static void show_votes(struct connection *caller)
                   "%d against, and %d abstained out of %d players."),
                 title, pvote->vote_no, pvote->cmdline,
                 MIN(100, pvote->need_pc * 100 + 1),
+                /* TRANS: preserve leading space */
                 pvote->flags & VCF_NODISSENT ? _(" no dissent") : "",
                 pvote->yes, pvote->no, pvote->abstain, count_voters(pvote));
       count++;
@@ -4124,6 +4139,133 @@ static bool playercolor_command(struct connection *caller,
 }
 
 /**********************************************************************//**
+  /playernation command handler.
+**************************************************************************/
+static bool playernation_command(struct connection *caller,
+                                 char *str, bool check)
+{
+  enum m_pre_result match_result;
+  struct player *pplayer;
+  struct nation_type *pnation;
+  struct nation_style *pstyle;
+  bool is_male = FALSE;
+  int ntokens = 0;
+  char *token[5];
+
+  ntokens = get_tokens(str, token, 5, TOKEN_DELIMITERS);
+
+  if (ntokens == 0) {
+    cmd_reply(CMD_PLAYERNATION, caller, C_SYNTAX,
+              _("At least one argument needed. See '/help playernation'."));
+    free_tokens(token, ntokens);
+    return FALSE;
+  }
+
+  if (game_was_started()) {
+    cmd_reply(CMD_PLAYERNATION, caller, C_FAIL,
+              _("Can only set player nation before game starts."));
+    free_tokens(token, ntokens);
+    return FALSE;
+  }
+
+  pplayer = player_by_name_prefix(token[0], &match_result);
+  if (!pplayer) {
+    cmd_reply_no_such_player(CMD_PLAYERNATION, caller, token[0], match_result);
+    free_tokens(token, ntokens);
+    return FALSE;
+  }
+
+  if (ntokens == 1) {
+    if (!check) {
+      player_set_nation(pplayer, NO_NATION_SELECTED);
+
+      cmd_reply(CMD_PLAYERNATION, caller, C_OK,
+                _("Nation of player %s reset."), player_name(pplayer));
+      send_player_info_c(pplayer, game.est_connections);
+    }
+  } else {
+    pnation = nation_by_rule_name(token[1]);
+    if (pnation == NO_NATION_SELECTED) {
+      cmd_reply(CMD_PLAYERNATION, caller, C_FAIL,
+                _("Unrecognized nation: %s."), token[1]);
+      free_tokens(token, ntokens);
+      return FALSE;
+    }
+
+    if (!client_can_pick_nation(pnation)) {
+      cmd_reply(CMD_PLAYERNATION, caller, C_FAIL,
+                _("%s nation is not available for user selection."),
+                token[1]);
+      free_tokens(token, ntokens);
+      return FALSE;
+    }
+
+    if (pnation->player && pnation->player != pplayer) {
+      cmd_reply(CMD_PLAYERNATION, caller, C_FAIL,
+                _("%s nation is already in use."), token[1]);
+      free_tokens(token, ntokens);
+      return FALSE;
+    }
+
+    if (ntokens < 3) {
+      cmd_reply(CMD_PLAYERNATION, caller, C_FAIL,
+             /* TRANS: Nation resetting form of /playernation does not require sex */
+                _("Player sex must be given when setting nation."));
+      free_tokens(token, ntokens);
+      return FALSE;
+    }
+
+    if (!strcmp(token[2], "0")) {
+      is_male = FALSE;
+    } else if (!strcmp(token[2], "1")) {
+      is_male = TRUE;
+    } else {
+      cmd_reply(CMD_PLAYERNATION, caller, C_FAIL,
+                _("Unrecognized gender: %s, expecting 1 or 0."), token[2]);
+      free_tokens(token, ntokens);
+      return FALSE;
+    }
+
+    if (ntokens > 4) {
+      pstyle = style_by_rule_name(token[4]);
+      if (!pstyle) {
+        cmd_reply(CMD_PLAYERNATION, caller, C_FAIL,
+                  _("Unrecognized style: %s."), token[4]);
+        free_tokens(token, ntokens);
+        return FALSE;
+      }
+    } else {
+      pstyle = style_of_nation(pnation);
+    }
+
+    if (!check) {
+      char error_buf[256];
+
+      player_set_nation(pplayer, pnation);
+      pplayer->style = pstyle;
+      pplayer->is_male = is_male;
+
+      if (ntokens > 3) {
+        if (!server_player_set_name_full(caller, pplayer, pnation, token[3],
+                                         error_buf, sizeof(error_buf))) {
+          cmd_reply(CMD_PLAYERNATION, caller, C_WARNING, "%s", error_buf);
+        }
+      } else {
+        server_player_set_name(pplayer, token[0]);
+      }
+      cmd_reply(CMD_PLAYERNATION, caller, C_OK,
+                _("Nation of player %s set to [%s]."), player_name(pplayer),
+                nation_rule_name(pnation));
+      send_player_info_c(pplayer, game.est_connections);
+    }
+  }
+
+  free_tokens(token, ntokens);
+
+  return TRUE;
+}
+
+/**************************************************************************
   Handle quit command
 **************************************************************************/
 static bool quit_game(struct connection *caller, bool check)
@@ -4438,6 +4580,8 @@ static bool handle_stdin_input_real(struct connection *caller, char *str,
     return unignore_command(caller, arg, check);
   case CMD_PLAYERCOLOR:
     return playercolor_command(caller, arg, check);
+  case CMD_PLAYERNATION:
+    return playernation_command(caller, arg, check);
   case CMD_NUM:
   case CMD_UNRECOGNIZED:
   case CMD_AMBIGUOUS:
@@ -6399,6 +6543,7 @@ static void show_delegations(struct connection *caller)
                 /* TRANS: last %s is either " (active)" or empty string */
                 _("%s delegates control over player '%s' to user %s%s."),
                 owner, player_name(pplayer), delegate_to,
+                /* TRANS: preserve leading space */
                 player_delegation_active(pplayer) ? _(" (active)") : "");
       empty = FALSE;
     }
@@ -6527,12 +6672,36 @@ void show_players(struct connection *caller)
                     cmdlevel_name(pconn->access_level),
                     (pconn->send_buffer->nsize >> 10));
         if (pconn->observer) {
+          /* TRANS: preserve leading space */
           sz_strlcat(buf, _(" (observer mode)"));
         }
         cmd_reply(CMD_LIST, caller, C_COMMENT, "    %s", buf);
       } conn_list_iterate_end;
     } players_iterate_end;
   }
+  cmd_reply(CMD_LIST, caller, C_COMMENT, horiz_line);
+}
+
+/**********************************************************************//**
+  List rulesets (strictly, .serv init script files that conventionally
+  accompany rulesets).
+**************************************************************************/
+static void show_rulesets(struct connection *caller)
+{
+  struct strvec *serv_list;
+
+  cmd_reply(CMD_LIST, caller, C_COMMENT,
+            /* TRANS: don't translate text between '' */
+            _("List of rulesets available with '%sread' command:"),
+	    (caller ? "/" : ""));
+  cmd_reply(CMD_LIST, caller, C_COMMENT, horiz_line);
+
+  serv_list = get_init_script_choices();
+  strvec_iterate(serv_list, s) {
+    cmd_reply(CMD_LIST, caller, C_COMMENT, "%s", s);
+  } strvec_iterate_end;
+  strvec_destroy(serv_list);
+
   cmd_reply(CMD_LIST, caller, C_COMMENT, horiz_line);
 }
 
@@ -6673,26 +6842,28 @@ static void show_colors(struct connection *caller)
   '/list' arguments
 **************************************************************************/
 #define SPECENUM_NAME list_args
-#define SPECENUM_VALUE0     LIST_COLORS
-#define SPECENUM_VALUE0NAME "colors"
-#define SPECENUM_VALUE1     LIST_CONNECTIONS
-#define SPECENUM_VALUE1NAME "connections"
-#define SPECENUM_VALUE2     LIST_DELEGATIONS
-#define SPECENUM_VALUE2NAME "delegations"
-#define SPECENUM_VALUE3     LIST_IGNORE
-#define SPECENUM_VALUE3NAME "ignored users"
-#define SPECENUM_VALUE4     LIST_MAPIMG
-#define SPECENUM_VALUE4NAME "map image definitions"
-#define SPECENUM_VALUE5     LIST_PLAYERS
-#define SPECENUM_VALUE5NAME "players"
-#define SPECENUM_VALUE6     LIST_SCENARIOS
-#define SPECENUM_VALUE6NAME "scenarios"
-#define SPECENUM_VALUE7     LIST_NATIONSETS
-#define SPECENUM_VALUE7NAME "nationsets"
-#define SPECENUM_VALUE8     LIST_TEAMS
-#define SPECENUM_VALUE8NAME "teams"
-#define SPECENUM_VALUE9     LIST_VOTES
-#define SPECENUM_VALUE9NAME "votes"
+#define SPECENUM_VALUE0      LIST_COLORS
+#define SPECENUM_VALUE0NAME  "colors"
+#define SPECENUM_VALUE1      LIST_CONNECTIONS
+#define SPECENUM_VALUE1NAME  "connections"
+#define SPECENUM_VALUE2      LIST_DELEGATIONS
+#define SPECENUM_VALUE2NAME  "delegations"
+#define SPECENUM_VALUE3      LIST_IGNORE
+#define SPECENUM_VALUE3NAME  "ignored users"
+#define SPECENUM_VALUE4      LIST_MAPIMG
+#define SPECENUM_VALUE4NAME  "map image definitions"
+#define SPECENUM_VALUE5      LIST_PLAYERS
+#define SPECENUM_VALUE5NAME  "players"
+#define SPECENUM_VALUE6      LIST_RULESETS
+#define SPECENUM_VALUE6NAME  "rulesets"
+#define SPECENUM_VALUE7      LIST_SCENARIOS
+#define SPECENUM_VALUE7NAME  "scenarios"
+#define SPECENUM_VALUE8      LIST_NATIONSETS
+#define SPECENUM_VALUE8NAME  "nationsets"
+#define SPECENUM_VALUE9      LIST_TEAMS
+#define SPECENUM_VALUE9NAME  "teams"
+#define SPECENUM_VALUE10     LIST_VOTES
+#define SPECENUM_VALUE10NAME "votes"
 #include "specenum_gen.h"
 
 /**********************************************************************//**
@@ -6746,6 +6917,9 @@ static bool show_list(struct connection *caller, char *arg)
     return TRUE;
   case LIST_PLAYERS:
     show_players(caller);
+    return TRUE;
+  case LIST_RULESETS:
+    show_rulesets(caller);
     return TRUE;
   case LIST_SCENARIOS:
     show_scenarios(caller);

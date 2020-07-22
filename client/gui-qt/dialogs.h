@@ -37,7 +37,6 @@ class QGridLayout;
 class QGroupBox;
 class QItemSelection;
 class QRadioButton;
-class QSignalMapper;
 class QTableView;
 class QTableWidget;
 class QTextEdit;
@@ -259,7 +258,6 @@ class choice_dialog: public QWidget
 {
   Q_OBJECT
   QPushButton *target_unit_button;
-  QSignalMapper *signal_mapper;
   QVBoxLayout *layout;
   QHBoxLayout *unit_skip;
   QList<Choice_dialog_button *> buttons_list;
@@ -282,7 +280,7 @@ public:
   Choice_dialog_button *get_identified_button(const int id);
   int unit_id;
   int target_id[ATK_COUNT];
-  int target_extra_id;
+  int sub_target_id[ASTK_COUNT];
   struct unit* targeted_unit;
   void update_dialog(const struct act_prob *act_probs);
 public slots:

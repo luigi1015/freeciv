@@ -139,9 +139,9 @@ l_noret luaD_throw (lua_State *L, int errcode) {
 
 
 int luaD_rawrunprotected (lua_State *L, Pfunc f, void *ud) {
-  l_uint32 oldnCcalls = L->nCcalls - L->nci;
+  global_State *g = G(L);
+  l_uint32 oldnCcalls = g->Cstacklimit - (L->nCcalls + L->nci);
   struct lua_longjmp lj;
-  lua_assert(L->nCcalls >= L->nci);
   lj.status = LUA_OK;
   lj.previous = L->errorJmp;  /* chain new error handler */
   L->errorJmp = &lj;
@@ -149,7 +149,7 @@ int luaD_rawrunprotected (lua_State *L, Pfunc f, void *ud) {
     (*f)(L, ud);
   );
   L->errorJmp = lj.previous;  /* restore old error handler */
-  L->nCcalls = oldnCcalls + L->nci;
+  L->nCcalls = g->Cstacklimit - oldnCcalls - L->nci;
   return lj.status;
 }
 
@@ -348,18 +348,18 @@ static StkId rethook (lua_State *L, CallInfo *ci, StkId firstres, int nres) {
 
 
 /*
-** Check whether __call metafield of 'func' is a function. If so, put
-** it in stack below original 'func' so that 'luaD_call' can call
-** it. Raise an error if __call metafield is not a function.
+** Check whether 'func' has a '__call' metafield. If so, put it in the
+** stack, below original 'func', so that 'luaD_call' can call it. Raise
+** an error if there is no '__call' metafield.
 */
 void luaD_tryfuncTM (lua_State *L, StkId func) {
   const TValue *tm = luaT_gettmbyobj(L, s2v(func), TM_CALL);
   StkId p;
-  if (unlikely(!ttisfunction(tm)))
-    luaG_typeerror(L, s2v(func), "call");
-  for (p = L->top; p > func; p--)
+  if (unlikely(ttisnil(tm)))
+    luaG_typeerror(L, s2v(func), "call");  /* nothing to call */
+  for (p = L->top; p > func; p--)  /* open space for metamethod */
     setobjs2s(L, p, p-1);
-  L->top++;  /* assume EXTRA_STACK */
+  L->top++;  /* stack space pre-allocated by the caller */
   setobj2s(L, func, tm);  /* metamethod is the new function to be called */
 }
 
@@ -422,7 +422,7 @@ void luaD_poscall (lua_State *L, CallInfo *ci, int nres) {
 
 
 
-#define next_ci(L)  (L->ci = (L->ci->next ? L->ci->next : luaE_extendCI(L)))
+#define next_ci(L)  (L->ci->next ? L->ci->next : luaE_extendCI(L))
 
 
 /*
@@ -457,22 +457,22 @@ void luaD_pretailcall (lua_State *L, CallInfo *ci, StkId func, int narg1) {
 */
 void luaD_call (lua_State *L, StkId func, int nresults) {
   lua_CFunction f;
-  TValue *funcv = s2v(func);
-  switch (ttypetag(funcv)) {
-    case LUA_TCCL:  /* C closure */
-      f = clCvalue(funcv)->f;
+ retry:
+  switch (ttypetag(s2v(func))) {
+    case LUA_VCCL:  /* C closure */
+      f = clCvalue(s2v(func))->f;
       goto Cfunc;
-    case LUA_TLCF:  /* light C function */
-      f = fvalue(funcv);
+    case LUA_VLCF:  /* light C function */
+      f = fvalue(s2v(func));
      Cfunc: {
       int n;  /* number of returns */
-      CallInfo *ci;
+      CallInfo *ci = next_ci(L);
       checkstackp(L, LUA_MINSTACK, func);  /* ensure minimum stack size */
-      ci = next_ci(L);
       ci->nresults = nresults;
       ci->callstatus = CIST_C;
       ci->top = L->top + LUA_MINSTACK;
       ci->func = func;
+      L->ci = ci;
       lua_assert(ci->top <= L->stack_last);
       if (L->hookmask & LUA_MASKCALL) {
         int narg = cast_int(L->top - func) - 1;
@@ -485,19 +485,19 @@ void luaD_call (lua_State *L, StkId func, int nresults) {
       luaD_poscall(L, ci, n);
       break;
     }
-    case LUA_TLCL: {  /* Lua function */
-      CallInfo *ci;
-      Proto *p = clLvalue(funcv)->p;
+    case LUA_VLCL: {  /* Lua function */
+      CallInfo *ci = next_ci(L);
+      Proto *p = clLvalue(s2v(func))->p;
       int narg = cast_int(L->top - func) - 1;  /* number of real arguments */
       int nfixparams = p->numparams;
       int fsize = p->maxstacksize;  /* frame size */
       checkstackp(L, fsize, func);
-      ci = next_ci(L);
       ci->nresults = nresults;
       ci->u.l.savedpc = p->code;  /* starting point */
       ci->callstatus = 0;
       ci->top = func + 1 + fsize;
       ci->func = func;
+      L->ci = ci;
       for (; narg < nfixparams; narg++)
         setnilvalue(s2v(L->top++));  /* complete missing arguments */
       lua_assert(ci->top <= L->stack_last);
@@ -505,9 +505,9 @@ void luaD_call (lua_State *L, StkId func, int nresults) {
       break;
     }
     default: {  /* not a function */
+      checkstackp(L, 1, func);  /* space for metamethod */
       luaD_tryfuncTM(L, func);  /* try to get '__call' metamethod */
-      luaD_call(L, func, nresults);  /* now it must be a function */
-      break;
+      goto retry;  /* try again with metamethod */
     }
   }
 }
@@ -521,7 +521,7 @@ void luaD_call (lua_State *L, StkId func, int nresults) {
 */
 void luaD_callnoyield (lua_State *L, StkId func, int nResults) {
   incXCcalls(L);
-  if (getCcalls(L) >= LUAI_MAXCSTACK)  /* possible stack overflow? */
+  if (getCcalls(L) <= CSTACKERR)  /* possible stack overflow? */
     luaE_freeCI(L);
   luaD_call(L, func, nResults);
   decXCcalls(L);
@@ -672,10 +672,10 @@ LUA_API int lua_resume (lua_State *L, lua_State *from, int nargs,
   else if (L->status != LUA_YIELD)  /* ended with errors? */
     return resume_error(L, "cannot resume dead coroutine", nargs);
   if (from == NULL)
-    L->nCcalls = 1;
+    L->nCcalls = CSTACKTHREAD;
   else  /* correct 'nCcalls' for this thread */
-    L->nCcalls = getCcalls(from) - from->nci + L->nci + CSTACKCF;
-  if (L->nCcalls >= LUAI_MAXCSTACK)
+    L->nCcalls = getCcalls(from) + from->nci - L->nci - CSTACKCF;
+  if (L->nCcalls <= CSTACKERR)
     return resume_error(L, "C stack overflow", nargs);
   luai_userstateresume(L, nargs);
   api_checknelems(L, (L->status == LUA_OK) ? nargs + 1 : nargs);

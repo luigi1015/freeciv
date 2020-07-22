@@ -20,10 +20,12 @@
 #include "log.h"
 
 /* common */
+#include "map.h"
 #include "specialist.h"
 
 /* server */
 #include "aiiface.h"
+#include "unittools.h"
 
 #include "savecompat.h"
 
@@ -73,9 +75,12 @@ static void compat_load_020500(struct loaddata *loading, enum sgf_version format
 static void compat_load_020600(struct loaddata *loading, enum sgf_version format_class);
 static void compat_load_030000(struct loaddata *loading, enum sgf_version format_class);
 static void compat_load_030100(struct loaddata *loading, enum sgf_version format_class);
+static void compat_post_load_030100(struct loaddata *loading,
+                                    enum sgf_version format_class);
 
 #ifdef FREECIV_DEV_SAVE_COMPAT
 static void compat_load_dev(struct loaddata *loading);
+static void compat_post_load_dev(struct loaddata *loading);
 #endif /* FREECIV_DEV_SAVE_COMPAT */
 
 typedef void (*load_version_func_t) (struct loaddata *loading, enum sgf_version format_class);
@@ -83,6 +88,7 @@ typedef void (*load_version_func_t) (struct loaddata *loading, enum sgf_version 
 struct compatibility {
   int version;
   const load_version_func_t load;
+  const load_version_func_t post_load;
 };
 
 /* The struct below contains the information about the savegame versions. It
@@ -99,21 +105,21 @@ struct compatibility {
  * - compat_load_030100 to load old savegame. */
 static struct compatibility compat[] = {
   /* dummy; equal to the current version (last element) */
-  { 0, NULL },
+  { 0, NULL, NULL },
   /* version 1 and 2 is not used */
   /* version 3: first savegame2 format, so no compat functions for translation
    * from previous format */
-  { 3, NULL },
+  { 3, NULL, NULL },
   /* version 4 to 9 are reserved for possible changes in 2.3.x */
-  { 10, compat_load_020400 },
+  { 10, compat_load_020400, NULL },
   /* version 11 to 19 are reserved for possible changes in 2.4.x */
-  { 20, compat_load_020500 },
+  { 20, compat_load_020500, NULL },
   /* version 21 to 29 are reserved for possible changes in 2.5.x */
-  { 30, compat_load_020600 },
+  { 30, compat_load_020600, NULL },
   /* version 31 to 39 are reserved for possible changes in 2.6.x */
-  { 40, compat_load_030000 },
+  { 40, compat_load_030000, NULL },
   /* version 41 to 49 are reserved for possible changes in 3.0.x */
-  { 50, compat_load_030100 },
+  { 50, compat_load_030100, compat_post_load_030100 },
   /* Current savefile version is listed above this line; it corresponds to
      the definitions in this file. */
 };
@@ -163,13 +169,43 @@ void sg_load_compat(struct loaddata *loading, enum sgf_version format_class)
   }
 
 #ifdef FREECIV_DEV_SAVE_COMPAT
-  if (loading->version == compat[compat_current].version
-#ifdef FREECIV_DEV_SAVE_COMPAT_3_0
-      /* Make use of 3.0 compatibility while it is there. */
-      || loading->version == 40
-#endif /* FREECIV_DEV_SAVE_COMPAT_3_0 */
-      ) {
+  if (loading->version == compat[compat_current].version) {
     compat_load_dev(loading);
+  }
+#endif /* FREECIV_DEV_SAVE_COMPAT */
+}
+
+/************************************************************************//**
+  Compatibility functions for loaded game that needs game state.
+
+  Some compatibility needs access to game state not available in
+  sg_load_compat(). Do those here.
+
+  This function is called after a savegame has loaded the game state. The
+  data should be changed in the game state since the game already is done
+  loading. Prefer using sg_load_compat() when possible.
+****************************************************************************/
+void sg_load_post_load_compat(struct loaddata *loading,
+                              enum sgf_version format_class)
+{
+  int i;
+
+  /* Check status and return if not OK (sg_success != TRUE). */
+  sg_check_ret();
+
+  for (i = 0; i < compat_num; i++) {
+    if (loading->version < compat[i].version
+        && compat[i].post_load != NULL) {
+      log_normal(_("Run post load compatibility function for version: <%d "
+                   "(save file: %d; server: %d)."), compat[i].version,
+                 loading->version, compat[compat_current].version);
+      compat[i].post_load(loading, format_class);
+    }
+  }
+
+#ifdef FREECIV_DEV_SAVE_COMPAT
+  if (loading->version == compat[compat_current].version) {
+    compat_post_load_dev(loading);
   }
 #endif /* FREECIV_DEV_SAVE_COMPAT */
 }
@@ -221,18 +257,6 @@ static const char num_chars[] =
   "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_-+";
 
 /************************************************************************//**
-  Converts number in to single character. This works to values up to ~70.
-****************************************************************************/
-char num2char(unsigned int num)
-{
-  if (num >= strlen(num_chars)) {
-    return '?';
-  }
-
-  return num_chars[num];
-}
-
-/************************************************************************//**
   Converts single character into numerical value. This is not hex conversion.
 ****************************************************************************/
 int char2num(char ch)
@@ -246,19 +270,6 @@ int char2num(char ch)
 
   return pch - num_chars;
 }
-
-/* Assert that num2char() can encode the values it is being used to encode.
- * Done here rather than in the save game writing code since static
- * assertions needs a constant expression. */
-
-/* Encoding actions in savegames with num2char() limits the number of
- * actions.
- * Note: <= is the correct operator. MAX_NUM_ACTIONS is number of
- * actions (the last action id + 1). strlen(num_chars) is the
- * number of chars (the last char position + 1). The assert is
- * supposed to be true. */
-FC_STATIC_STRLEN_ASSERT(MAX_NUM_ACTIONS <= strlen(num_chars),
-                        can_not_encode_all_actions);
 
 /************************************************************************//**
   Return the special with the given name, or S_LAST.
@@ -1087,8 +1098,8 @@ static void compat_load_020600(struct loaddata *loading,
   /* Build [research]. */
   {
     const struct {
-      const char *entry_name;
-      enum entry_type entry_type;
+      const char *name;
+      enum entry_type type;
     } entries[] = {
       { "goal_name", ENTRY_STR },
       { "techs", ENTRY_INT },
@@ -1142,37 +1153,40 @@ static void compat_load_020600(struct loaddata *loading,
 
       /* Move entries. */
       for (j = 0; j < ARRAY_SIZE(entries); j++) {
-        switch (entries[j].entry_type) {
+        switch (entries[j].type) {
         case ENTRY_BOOL:
           if (secfile_lookup_bool(loading->file, &bval,
                                   "player%d.research.%s",
-                                  plrno, entries[j].entry_name)) {
+                                  plrno, entries[j].name)) {
             secfile_insert_bool(loading->file, bval, "research.r%d.%s",
-                                i, entries[j].entry_name);
+                                i, entries[j].name);
           }
           break;
         case ENTRY_INT:
           if (secfile_lookup_int(loading->file, &ival,
                                  "player%d.research.%s",
-                                 plrno, entries[j].entry_name)) {
+                                 plrno, entries[j].name)) {
             secfile_insert_int(loading->file, ival, "research.r%d.%s",
-                               i, entries[j].entry_name);
+                               i, entries[j].name);
           }
           break;
         case ENTRY_STR:
           if ((sval = secfile_lookup_str(loading->file,
                                          "player%d.research.%s",
-                                         plrno, entries[j].entry_name))) {
+                                         plrno, entries[j].name))) {
             secfile_insert_str(loading->file, sval, "research.r%d.%s",
-                               i, entries[j].entry_name);
+                               i, entries[j].name);
           }
           break;
         case ENTRY_FLOAT:
-          sg_failure_ret(entries[j].entry_type != ENTRY_FLOAT,
+          sg_failure_ret(entries[j].type != ENTRY_FLOAT,
                          "Research related entry marked as float.");
           break;
         case ENTRY_FILEREFERENCE:
-          fc_assert(entries[j].entry_type != ENTRY_FILEREFERENCE);
+          fc_assert(entries[j].type != ENTRY_FILEREFERENCE);
+          break;
+        case ENTRY_ILLEGAL:
+          fc_assert(entries[j].type != ENTRY_ILLEGAL);
           break;
         }
       }
@@ -1375,6 +1389,94 @@ static void compat_load_030000(struct loaddata *loading,
   secfile_replace_int(loading->file, num_settings, "settings.set_count");
 }
 
+/************************************************************************//*
+  Insert server side agent information.
+***************************************************************************/
+static void insert_server_side_agent(struct loaddata *loading,
+                                     enum sgf_version format_class)
+{
+  int ssa_size;
+
+  if (format_class == SAVEGAME_2) {
+    /* Handled in savegame2 */
+    return;
+  }
+
+  ssa_size = secfile_lookup_int_default(loading->file, 0,
+                                        "savefile.server_side_agent_size");
+
+  if (ssa_size != 0) {
+    /* Already inserted. */
+    return;
+  }
+
+  /* Add server side agent order. */
+  secfile_insert_int(loading->file, SSA_COUNT,
+                     "savefile.server_side_agent_size");
+  if (SSA_COUNT > 0) {
+    const char **modname;
+    int i;
+    int j;
+
+    i = 0;
+    modname = fc_calloc(SSA_COUNT, sizeof(*modname));
+
+    for (j = 0; j < SSA_COUNT; j++) {
+      modname[i++] = server_side_agent_name(j);
+    }
+
+    secfile_insert_str_vec(loading->file, modname,
+                           SSA_COUNT,
+                           "savefile.server_side_agent_list");
+    free(modname);
+  }
+
+  /* Insert server_side_agent unit field. */
+  player_slots_iterate(pslot) {
+    int unit;
+    int units_num;
+    int plrno = player_slot_index(pslot);
+
+    if (secfile_section_lookup(loading->file, "player%d", plrno)
+        == NULL) {
+      continue;
+    }
+
+    /* Number of units the player has. */
+    units_num = secfile_lookup_int_default(loading->file, 0,
+                                           "player%d.nunits",
+                                           plrno);
+
+    for (unit = 0; unit < units_num; unit++) {
+      bool ai;
+
+      if (secfile_section_lookup(loading->file,
+                                 "player%d.u%d.server_side_agent",
+                                 plrno, unit)
+          != NULL) {
+        /* Already updated? */
+        continue;
+      }
+
+      ai = secfile_lookup_bool_default(loading->file, FALSE,
+                                       "player%d.u%d.ai",
+                                       plrno, unit);
+
+      if (ai) {
+        /* Autosettler and Auotexplore are separated by
+         * compat_post_load_030100() when set to SSA_AUTOSETTLER */
+        secfile_insert_int(loading->file, SSA_AUTOSETTLER,
+                           "player%d.u%d.server_side_agent",
+                           plrno, unit);
+      } else {
+        secfile_insert_int(loading->file, SSA_NONE,
+                           "player%d.u%d.server_side_agent",
+                           plrno, unit);
+      }
+    }
+  } player_slots_iterate_end;
+}
+
 /************************************************************************//**
   Translate savegame secfile data from 3.0.x to 3.1.0 format.
   Note that even after 2.6 savegame has gone through all the compatibility
@@ -1388,6 +1490,323 @@ static void compat_load_030100(struct loaddata *loading,
   sg_check_ret();
 
   log_debug("Upgrading data from savegame to version 3.1.0");
+
+  /* Actions are now stored by number. */
+  player_slots_iterate(pslot) {
+    int unit;
+    int units_num;
+    int plrno = player_slot_index(pslot);
+
+    if (secfile_section_lookup(loading->file, "player%d", plrno)
+        == NULL) {
+      continue;
+    }
+
+    /* Number of units the player has. */
+    units_num = secfile_lookup_int_default(loading->file, 0,
+                                           "player%d.nunits",
+                                           plrno);
+
+    for (unit = 0; unit < units_num; unit++) {
+      const char *action_unitstr;
+      int order_len;
+
+      order_len = secfile_lookup_int_default(loading->file, 0,
+                                             "player%d.u%d.orders_length",
+                                             plrno, unit);
+
+      if ((action_unitstr = secfile_lookup_str_default(loading->file, "",
+                                                       "player%d.u%d.action_list",
+                                                       plrno, unit))) {
+        int order_num;
+
+        if (order_len > strlen(action_unitstr)) {
+          order_len = strlen(action_unitstr);
+        }
+
+        for (order_num = 0; order_num < order_len; order_num++) {
+          int unconverted_action_id;
+
+          if (action_unitstr[order_num] == '?') {
+            unconverted_action_id = -1;
+          } else {
+            unconverted_action_id = char2num(action_unitstr[order_num]);
+          }
+
+          if (order_num == 0) {
+            /* The start of a vector has no number. */
+            secfile_insert_int(loading->file, unconverted_action_id,
+                               "player%d.u%d.action_vec",
+                               plrno, unit);
+          } else {
+            secfile_insert_int(loading->file, unconverted_action_id,
+                               "player%d.u%d.action_vec,%d",
+                               plrno, unit, order_num);
+          }
+        }
+      }
+    }
+  } player_slots_iterate_end;
+
+  /* Explicit server side agent was new in 3.1 */
+  insert_server_side_agent(loading, format_class);
+}
+
+/**********************************************************************//**
+  Upgrade unit activity orders to unit action orders.
+**************************************************************************/
+static void unit_order_activity_to_action(struct unit *act_unit)
+{
+  int i;
+
+  for (i = 0; i < act_unit->orders.length; i++) {
+    struct unit_order *order = &act_unit->orders.list[i];
+
+    if (order->order != ORDER_ACTIVITY) {
+      continue;
+    }
+
+    switch (order->activity) {
+    case ACTIVITY_FALLOUT:
+    case ACTIVITY_POLLUTION:
+    case ACTIVITY_MINE:
+    case ACTIVITY_IRRIGATE:
+    case ACTIVITY_PLANT:
+    case ACTIVITY_CULTIVATE:
+    case ACTIVITY_TRANSFORM:
+    case ACTIVITY_CONVERT:
+    case ACTIVITY_FORTIFYING:
+    case ACTIVITY_BASE:
+    case ACTIVITY_GEN_ROAD:
+    case ACTIVITY_PILLAGE:
+      action_iterate(act_id) {
+        struct action *paction = action_by_number(act_id);
+        if (action_get_activity(paction) == order->activity) {
+          order->order = ORDER_PERFORM_ACTION;
+          order->action = action_number(paction);
+          order->activity = ACTIVITY_LAST;
+          break;
+        }
+      } action_iterate_end;
+      break;
+    case ACTIVITY_SENTRY:
+      /* Not an action */
+      break;
+    case ACTIVITY_EXPLORE:
+    case ACTIVITY_IDLE:
+    case ACTIVITY_GOTO:
+    case ACTIVITY_FORTIFIED:
+    case ACTIVITY_OLD_ROAD:
+    case ACTIVITY_OLD_RAILROAD:
+    case ACTIVITY_FORTRESS:
+    case ACTIVITY_AIRBASE:
+    case ACTIVITY_PATROL_UNUSED:
+    case ACTIVITY_LAST:
+    case ACTIVITY_UNKNOWN:
+      log_error("Activity %d is not supposed to appear in unit orders",
+                order->activity);
+      break;
+    }
+  }
+}
+
+/*******************************************************************//**
+  Returns the opposite direction.
+***********************************************************************/
+static enum direction8 dir_opposite(enum direction8 dir)
+{
+  switch (dir) {
+  case DIR8_NORTH:
+    return DIR8_SOUTH;
+  case DIR8_NORTHEAST:
+    return DIR8_SOUTHWEST;
+  case DIR8_EAST:
+    return DIR8_WEST;
+  case DIR8_SOUTHEAST:
+    return DIR8_NORTHWEST;
+  case DIR8_SOUTH:
+    return DIR8_NORTH;
+  case DIR8_SOUTHWEST:
+    return DIR8_NORTHEAST;
+  case DIR8_WEST:
+    return DIR8_EAST;
+  case DIR8_NORTHWEST:
+    return DIR8_SOUTHEAST;
+  }
+
+  return DIR8_ORIGIN;
+}
+
+/**********************************************************************//**
+  Upgrade unit action order target encoding.
+**************************************************************************/
+static void upgrade_unit_order_targets(struct unit *act_unit)
+{
+  int i;
+  struct tile *current_tile;
+  struct tile *tgt_tile;
+
+  if (!unit_has_orders(act_unit)) {
+    return;
+  }
+
+  /* The order index is for the unit at its current tile. */
+  current_tile = unit_tile(act_unit);
+
+  /* Rewind to the beginning of the orders */
+  for (i = act_unit->orders.index; i > 0; i--) {
+    struct unit_order *prev_order = &act_unit->orders.list[i - 1];
+
+    if (!(prev_order->order == ORDER_PERFORM_ACTION
+          && utype_is_unmoved_by_action(action_by_number(prev_order->action),
+                                        unit_type_get(act_unit)))
+        && direction8_is_valid(prev_order->dir)) {
+      current_tile = mapstep(&(wld.map), current_tile,
+                             dir_opposite(prev_order->dir));
+    }
+  }
+
+  /* Upgrade to explicit target tile */
+  for (i = 0; i < act_unit->orders.length; i++) {
+    struct unit_order *order = &act_unit->orders.list[i];
+
+    if (order->order == ORDER_PERFORM_ACTION
+        && order->target != NO_TARGET) {
+      /* The target is already specified in the new format. */
+      tgt_tile = index_to_tile(&(wld.map), order->target);
+      fc_assert(tgt_tile != NULL);
+      return;
+    }
+
+    if (!direction8_is_valid(order->dir)) {
+      /* The target of the action is on the actor's tile. */
+      tgt_tile = current_tile;
+    } else {
+      /* The target of the action is on a tile next to the actor. */
+      tgt_tile = mapstep(&(wld.map), current_tile, order->dir);
+    }
+
+    if (order->order == ORDER_PERFORM_ACTION) {
+      struct action *paction = action_by_number(order->action);
+
+      order->target = tgt_tile->index;
+      /* Leave no traces. */
+      order->dir = DIR8_ORIGIN;
+
+      if (!utype_is_unmoved_by_action(paction, unit_type_get(act_unit))) {
+        /* The action moves the unit to the target tile (unless this is the
+         * final order) */
+        fc_assert(utype_is_moved_to_tgt_by_action(paction,
+                                                  unit_type_get(act_unit))
+                  || i == act_unit->orders.length - 1);
+        current_tile = tgt_tile;
+      }
+    } else {
+      current_tile = tgt_tile;
+    }
+  }
+}
+
+/************************************************************************//*
+  Correct the server side agent information.
+***************************************************************************/
+static void upgrade_server_side_agent(struct loaddata *loading)
+{
+  players_iterate_alive(pplayer) {
+    unit_list_iterate(pplayer->units, punit) {
+      if (punit->activity == ACTIVITY_EXPLORE) {
+        punit->ssa_controller = SSA_AUTOEXPLORE;
+      }
+    } unit_list_iterate_end;
+  } players_iterate_alive_end;
+}
+
+/************************************************************************//**
+  Update loaded game data from 3.0.x to something usable by 3.1.0.
+****************************************************************************/
+static void compat_post_load_030100(struct loaddata *loading,
+                                    enum sgf_version format_class)
+{
+  /* Check status and return if not OK (sg_success != TRUE). */
+  sg_check_ret();
+
+  /* Action orders were new in 3.0 */
+  if (format_class == SAVEGAME_3) {
+    /* Only 3.0 savegames may have "Attack" action orders. */
+    players_iterate_alive(pplayer) {
+      unit_list_iterate(pplayer->units, punit) {
+        int i;
+
+        if (!punit->has_orders) {
+          continue;
+        }
+
+        fc_assert_action(punit->orders.length == 0
+                         || punit->orders.list != NULL, continue);
+
+        for (i = 0; i < punit->orders.length; i++) {
+          /* "Attack" was split in "Suicide Attack" and "Attack" in 3.1. */
+          if (punit->orders.list[i].order == ORDER_PERFORM_ACTION
+              && punit->orders.list[i].action == ACTION_ATTACK
+              && !unit_can_do_action(punit, ACTION_ATTACK)
+              && unit_can_do_action(punit, ACTION_SUICIDE_ATTACK)) {
+            punit->orders.list[i].action = ACTION_SUICIDE_ATTACK;
+          }
+
+          /* Production targeted actions were split from building targeted
+           * actions in 3.1. The building sub target encoding changed. */
+          if (punit->orders.list[i].order == ORDER_PERFORM_ACTION
+              && ((punit->orders.list[i].action
+                   == ACTION_SPY_TARGETED_SABOTAGE_CITY)
+                  || (punit->orders.list[i].action
+                      == ACTION_SPY_TARGETED_SABOTAGE_CITY_ESC))) {
+            punit->orders.list[i].sub_target -= 1;
+          }
+          if (punit->orders.list[i].order == ORDER_PERFORM_ACTION
+              && (punit->orders.list[i].action
+                  == ACTION_SPY_TARGETED_SABOTAGE_CITY)
+              && punit->orders.list[i].sub_target == -1) {
+            punit->orders.list[i].action
+                = ACTION_SPY_SABOTAGE_CITY_PRODUCTION;
+          }
+          if (punit->orders.list[i].order == ORDER_PERFORM_ACTION
+              && (punit->orders.list[i].action
+                  == ACTION_SPY_TARGETED_SABOTAGE_CITY_ESC)
+              && punit->orders.list[i].sub_target == -1) {
+            punit->orders.list[i].action
+                = ACTION_SPY_SABOTAGE_CITY_PRODUCTION_ESC;
+          }
+        }
+      } unit_list_iterate_end;
+    } players_iterate_alive_end;
+  }
+
+  /* Explicit server side agent was new in 3.1 */
+  upgrade_server_side_agent(loading);
+
+  /* Some activities should only be ordered in action orders. */
+  players_iterate_alive(pplayer) {
+    unit_list_iterate(pplayer->units, punit) {
+      unit_order_activity_to_action(punit);
+    } unit_list_iterate_end;
+  } players_iterate_alive_end;
+
+  /* Unit order action target isn't dir anymore */
+  players_iterate_alive(pplayer) {
+    unit_list_iterate(pplayer->units, punit) {
+      upgrade_unit_order_targets(punit);
+    } unit_list_iterate_end;
+  } players_iterate_alive_end;
+
+  /* Backward compatibility: if we had any open-ended orders (pillage)
+   * in the savegame, assign specific targets now */
+  players_iterate_alive(pplayer) {
+    unit_list_iterate(pplayer->units, punit) {
+      unit_assign_specific_activity_target(punit,
+                                           &punit->activity,
+                                           &punit->activity_target);
+    } unit_list_iterate_end;
+  } players_iterate_alive_end;
 }
 
 /************************************************************************//**
@@ -1398,10 +1817,6 @@ static void compat_load_030100(struct loaddata *loading,
 static void compat_load_dev(struct loaddata *loading)
 {
   int game_version;
-#ifdef FREECIV_DEV_SAVE_COMPAT_3_0
-  struct entry *convert_entry;
-  int num_settings;
-#endif /* FREECIV_DEV_SAVE_COMPAT_3_0 */
 
   /* Check status and return if not OK (sg_success != TRUE). */
   sg_check_ret();
@@ -1412,368 +1827,352 @@ static void compat_load_dev(struct loaddata *loading)
     game_version = 2060000;
   }
 
-#ifdef FREECIV_DEV_SAVE_COMPAT_3_0
-  if (game_version < 2920000) {
-    /* Since version number bump to 2.91.99 */
-
-#ifdef FREECIV_WEB
-    /* Freeciv-web has replaced fcweb with classic. Only done for
-     * Freeciv-web because a regular Freeciv server build that encounters a
-     * fcweb savegame may have a ruleset named fcweb installed locally. */
-
-    const char *ruleset;
-
-    ruleset = secfile_lookup_str_default(loading->file,
-                                         GAME_DEFAULT_RULESETDIR,
-                                         "savefile.rulesetdir");
-
-    if (strcmp("fcweb", ruleset) == 0) {
-      secfile_replace_str(loading->file, "classic", "savefile.rulesetdir");
-    }
-#endif /* FREECIV_WEB */
-
-    /* Idle turns */
-    player_slots_iterate(pslot) {
-      int plrno = player_slot_index(pslot);
-      int idlet;
-      int ncities;
-      int i;
-
-      if (secfile_section_lookup(loading->file, "player%d", plrno) == NULL) {
-        continue;
-      }
-
-      idlet = secfile_lookup_int_default(loading->file, -1,
-                                         "player%d.idle_turns", plrno);
-
-      if (idlet == -1) {
-        secfile_insert_int(loading->file, 0, "player%d.idle_turns", plrno);
-      }
-
-      if (secfile_entry_lookup(loading->file, "player%d.sex", plrno) == NULL) {
-        if (secfile_lookup_bool_default(loading->file, TRUE, "player%d.is_male", plrno)) {
-          secfile_insert_str(loading->file, "male", "player%d.sex", plrno);
-        } else {
-          secfile_insert_str(loading->file, "female", "player%d.sex", plrno);
-        }
-      }
-
-      ncities = secfile_lookup_int_default(loading->file, 0, "player%d.ncities", plrno);
-
-      for (i = 0; i < ncities; i++) {
-        struct entry *did_buy = secfile_entry_lookup(loading->file, "player%d.c%d.did_buy",
-                                                     plrno, i);
-
-        /* If did buy is an integer value, make it boolean instead */
-        if (did_buy != NULL && entry_type(did_buy) == ENTRY_INT) {
-          int val;
-
-          entry_int_get(did_buy, &val);
-
-          if (val) {
-            secfile_replace_bool(loading->file, TRUE, "player%d.c%d.did_buy",
-                                 plrno, i);
-          } else {
-            secfile_replace_bool(loading->file, FALSE, "player%d.c%d.did_buy",
-                                 plrno, i);
-          }
-        }
-      }
-    } player_slots_iterate_end;
-
-    /* Settings */
-    num_settings = secfile_lookup_int_default(loading->file, 0,
-                                              "settings.set_count");
-
-    /* User meta server message is now a setting. */
-    if (secfile_lookup_bool_default(loading->file, FALSE,
-                                    "game.meta_usermessage")) {
-      const char *metamessage;
-
-      metamessage = secfile_lookup_str_default(loading->file, "",
-                                               "game.meta_message");
-
-      /* Insert the meta message as a setting */
-      secfile_insert_str(loading->file, "metamessage",
-                         "settings.set%d.name", num_settings);
-      secfile_insert_str(loading->file, metamessage,
-                         "settings.set%d.value", num_settings);
-      secfile_insert_str(loading->file, "",
-                         "settings.set%d.gamestart", num_settings);
-      num_settings++;
-    }
-
-    convert_entry = secfile_entry_lookup(loading->file, "game.phase_mode");
-    if (convert_entry != NULL && entry_type(convert_entry) == ENTRY_INT) {
-      int nval;
-
-      entry_int_get(convert_entry, &nval);
-
-      secfile_replace_str(loading->file, phase_mode_type_name(nval),
-                          "game.phase_mode");
-    }
-    convert_entry = secfile_entry_lookup(loading->file, "game.phase_mode_stored");
-    if (convert_entry != NULL && entry_type(convert_entry) == ENTRY_INT) {
-      int nval;
-
-      entry_int_get(convert_entry, &nval);
-
-      secfile_replace_str(loading->file, phase_mode_type_name(nval),
-                          "game.phase_mode_stored");
-    }
-  
-    secfile_replace_int(loading->file, num_settings, "settings.set_count");
-
-    /* Unit action decision aren't text any more. */
-    if (secfile_section_lookup(loading->file,
-                               "savefile.action_decision_vector") == NULL) {
-      int i;
-
-      /* Write action decision order. */
-      secfile_insert_int(loading->file, ACT_DEC_COUNT,
-                         "savefile.action_decision_size");
-      if (ACT_DEC_COUNT > 0) {
-        const char **modname;
-        int j;
-
-        i = 0;
-        modname = fc_calloc(ACT_DEC_COUNT, sizeof(*modname));
-
-        for (j = 0; j < ACT_DEC_COUNT; j++) {
-          modname[i++] = action_decision_name(j);
-        }
-
-        secfile_insert_str_vec(loading->file, modname,
-                               ACT_DEC_COUNT,
-                               "savefile.action_decision_vector");
-        free(modname);
-      }
-
-      /* Upgrade each unit. */
-      player_slots_iterate(pslot) {
-        int unit;
-        int units_num;
-        int plrno = player_slot_index(pslot);
-
-        if (secfile_section_lookup(loading->file, "player%d", plrno)
-            == NULL) {
-          continue;
-        }
-
-        /* Number of units the player has. */
-        units_num = secfile_lookup_int_default(loading->file, 0,
-                                               "player%d.nunits",
-                                               plrno);
-
-        for (unit = 0; unit < units_num; unit++) {
-          int want;
-
-          /* Load old enum action decision want. */
-          want = secfile_lookup_enum_default(loading->file,
-              ACT_DEC_NOTHING, action_decision,
-              "player%d.u%d.action_decision_want", plrno, unit);
-
-          /* Store the action decision want. */
-          secfile_insert_int(loading->file, want,
-                             "player%d.u%d.action_decision",
-                             plrno, unit);
-        }
-      } player_slots_iterate_end;
-    }
-  }
-
-  if (game_version < 2930000) {
-    /* Since version number bump to 2.92.99 */
-    player_slots_iterate(pslot) {
-      int plrno = player_slot_index(pslot);
-
-      if (secfile_section_lookup(loading->file, "player%d", plrno) == NULL) {
-        continue;
-      }
-
-      if (secfile_entry_lookup(loading->file, "player%d.kind", plrno) == NULL) {
-	const char *kind = secfile_lookup_str_default(loading->file, "male", "player%d.sex", plrno);
-
-	secfile_insert_str(loading->file, kind, "player%d.kind", plrno);
-      }
-    } player_slots_iterate_end;
-  }
-
-  /* Renamed actions. */
-  loading->action.size = secfile_lookup_int_default(loading->file, 0,
-                                                    "savefile.action_size");
-  if (loading->action.size) {
-    const char **modname;
-    int j;
-
-    modname = secfile_lookup_str_vec(loading->file, &loading->action.size,
-                                     "savefile.action_vector");
-
-    for (j = 0; j < loading->action.size; j++) {
-      if (fc_strcasecmp(modname[j], "Targeted Steal Tech Escape") == 0) {
-        secfile_replace_str(loading->file, "Targeted Steal Tech Escape Expected",
-                            "savefile.action_vector,%d", j);
-      } else if (fc_strcasecmp(modname[j], "Steal Tech Escape") == 0) {
-        secfile_replace_str(loading->file, "Steal Tech Escape Expected",
-                            "savefile.action_vector,%d", j);
-      }
-    }
-
-    free(modname);
-  }
-#endif /* FREECIV_DEV_SAVE_COMPAT_3_0 */
-
 #ifdef FREECIV_DEV_SAVE_COMPAT_3_1
-  /* Renamed actions. */
-  loading->action.size = secfile_lookup_int_default(loading->file, 0,
-                                                    "savefile.action_size");
-  if (loading->action.size) {
-    const char **modname;
-    int j;
 
-    modname = secfile_lookup_str_vec(loading->file, &loading->action.size,
-                                     "savefile.action_vector");
+  if (game_version < 3009200) {
+    /* Before version number bump to 3.0.92, beginning of 2020 */
 
-    for (j = 0; j < loading->action.size; j++) {
-      if (fc_strcasecmp(modname[j], "Targeted Steal Tech Escape") == 0) {
-        secfile_replace_str(loading->file, "Targeted Steal Tech Escape Expected",
-                            "savefile.action_vector,%d", j);
-      } else if (fc_strcasecmp(modname[j], "Steal Tech Escape") == 0) {
-        secfile_replace_str(loading->file, "Steal Tech Escape Expected",
-                            "savefile.action_vector,%d", j);
-      }
-    }
-
-    free(modname);
-  }
-
-  /* Old unit order tgt_vec refers to order sub targets */
-  player_slots_iterate(pslot) {
-    int unit;
-    int units_num;
-    int plrno = player_slot_index(pslot);
-
-    if (secfile_section_lookup(loading->file, "player%d", plrno)
-        == NULL) {
-      continue;
-    }
-
-    /* Number of units the player has. */
-    units_num = secfile_lookup_int_default(loading->file, 0,
-                                           "player%d.nunits",
-                                           plrno);
-
-    for (unit = 0; unit < units_num; unit++) {
-      size_t old_tgt_size;
-      int *old_tgt_vec;
-
-      if ((old_tgt_vec = secfile_lookup_int_vec(loading->file, &old_tgt_size,
-                                                "player%d.u%d.tgt_vec",
-                                                plrno, unit))) {
-        secfile_insert_int_vec(loading->file, old_tgt_vec, old_tgt_size,
-                               "player%d.u%d.sub_tgt_vec", plrno, unit);
-        free(old_tgt_vec);
-      }
-    }
-  } player_slots_iterate_end;
-
-  /* Unit order extra sub targets was for a while stored separate from tech
-   * and building sub targets. */
-  player_slots_iterate(pslot) {
-    int unit;
-    int units_num;
-    int plrno = player_slot_index(pslot);
-
-    if (secfile_section_lookup(loading->file, "player%d", plrno)
-        == NULL) {
-      continue;
-    }
-
-    /* Number of units the player has. */
-    units_num = secfile_lookup_int_default(loading->file, 0,
-                                           "player%d.nunits",
-                                           plrno);
-
-    for (unit = 0; unit < units_num; unit++) {
-      size_t extra_vec_size;
-      int *extra_vec;
-
-      if ((extra_vec = secfile_lookup_int_vec(loading->file,
-                                              &extra_vec_size,
-                                              "player%d.u%d.extra_vec",
-                                              plrno, unit))) {
-        int order_num;
-
-        for (order_num = 0; order_num < extra_vec_size; order_num++) {
-          if (extra_vec[order_num] != -1) {
-            if (order_num) {
-              secfile_replace_int(loading->file, extra_vec[order_num],
-                                  "player%d.u%d.sub_tgt_vec,%d",
-                                  plrno, unit, order_num);
-            } else {
-              secfile_replace_int(loading->file, extra_vec[order_num],
-                                  "player%d.u%d.sub_tgt_vec",
-                                  plrno, unit);
-            }
-          }
-        }
-        free(extra_vec);
-      }
-    }
-  } player_slots_iterate_end;
-
-  player_slots_iterate(pslot) {
-    int plrno = player_slot_index(pslot);
-    int history;
-
-    history = secfile_lookup_int_default(loading->file, 0,
-                                         "player%d.culture",
-                                         plrno);
-
-    if (history > 0) {
-      /* Savefile had player history value saved to field named 'culture'.
-       * Save it to 'history'. */
-      secfile_insert_int(loading->file, history, "player%d.history", plrno);
-    }
-  } player_slots_iterate_end;
-
-  {
-    int action_count;
-
-    action_count = secfile_lookup_int_default(loading->file, 0,
-                                              "savefile.action_size");
-    if (action_count > 0) {
+    /* Renamed actions. */
+    loading->action.size = secfile_lookup_int_default(loading->file, 0,
+                                                      "savefile.action_size");
+    if (loading->action.size) {
       const char **modname;
-      const char **modname_new;
-      const char *plant_name = "Plant";
-      const char *cultivate_name = "Cultivate";
       int j;
 
       modname = secfile_lookup_str_vec(loading->file, &loading->action.size,
                                        "savefile.action_vector");
 
-      modname_new = fc_calloc(action_count, sizeof(*modname_new));
-
-      for (j = 0; j < action_count; j++) {
-        const char *aname = modname[j];
-
-        if (!fc_strcasecmp("Mine TF", aname)) {
-          modname_new[j] = plant_name;
-        } else if (!fc_strcasecmp("Irrigate TF", aname)) {
-          modname_new[j] = cultivate_name;
-        } else {
-          modname_new[j] = aname;
+      for (j = 0; j < loading->action.size; j++) {
+        if (fc_strcasecmp(modname[j], "Targeted Steal Tech Escape") == 0) {
+          secfile_replace_str(loading->file, "Targeted Steal Tech Escape Expected",
+                              "savefile.action_vector,%d", j);
+        } else if (fc_strcasecmp(modname[j], "Steal Tech Escape") == 0) {
+          secfile_replace_str(loading->file, "Steal Tech Escape Expected",
+                              "savefile.action_vector,%d", j);
+        } else if (fc_strcasecmp(modname[j], "Road") == 0) {
+          secfile_replace_str(loading->file, "Build Road",
+                              "savefile.action_vector,%d", j);
         }
       }
 
-      secfile_replace_str_vec(loading->file, modname_new, NUM_ACTIONS,
-                              "savefile.action_vector");
-
-      free(modname_new);
+      free(modname);
     }
-  }
+
+    /* Old unit order tgt_vec refers to order sub targets */
+    player_slots_iterate(pslot) {
+      int unit;
+      int units_num;
+      int plrno = player_slot_index(pslot);
+
+      if (secfile_section_lookup(loading->file, "player%d", plrno)
+          == NULL) {
+        continue;
+      }
+
+      /* Number of units the player has. */
+      units_num = secfile_lookup_int_default(loading->file, 0,
+                                             "player%d.nunits",
+                                             plrno);
+
+      for (unit = 0; unit < units_num; unit++) {
+        size_t old_tgt_size;
+        int *old_tgt_vec;
+
+        if ((old_tgt_vec = secfile_lookup_int_vec(loading->file, &old_tgt_size,
+                                                  "player%d.u%d.tgt_vec",
+                                                  plrno, unit))) {
+          secfile_insert_int_vec(loading->file, old_tgt_vec, old_tgt_size,
+                                 "player%d.u%d.sub_tgt_vec", plrno, unit);
+          free(old_tgt_vec);
+        }
+      }
+    } player_slots_iterate_end;
+
+    /* Unit order extra sub targets was for a while stored separate from tech
+     * and building sub targets. */
+    player_slots_iterate(pslot) {
+      int unit;
+      int units_num;
+      int plrno = player_slot_index(pslot);
+
+      if (secfile_section_lookup(loading->file, "player%d", plrno)
+          == NULL) {
+        continue;
+      }
+
+      /* Number of units the player has. */
+      units_num = secfile_lookup_int_default(loading->file, 0,
+                                             "player%d.nunits",
+                                             plrno);
+
+      for (unit = 0; unit < units_num; unit++) {
+        size_t extra_vec_size;
+        int *extra_vec;
+
+        if ((extra_vec = secfile_lookup_int_vec(loading->file,
+                                                &extra_vec_size,
+                                                "player%d.u%d.extra_vec",
+                                                plrno, unit))) {
+          int order_num;
+
+          for (order_num = 0; order_num < extra_vec_size; order_num++) {
+            if (extra_vec[order_num] != -1) {
+              if (order_num) {
+                secfile_replace_int(loading->file, extra_vec[order_num],
+                                    "player%d.u%d.sub_tgt_vec,%d",
+                                    plrno, unit, order_num);
+              } else {
+                secfile_replace_int(loading->file, extra_vec[order_num],
+                                    "player%d.u%d.sub_tgt_vec",
+                                    plrno, unit);
+              }
+            }
+          }
+          free(extra_vec);
+        }
+      }
+    } player_slots_iterate_end;
+
+    player_slots_iterate(pslot) {
+      int plrno = player_slot_index(pslot);
+      int history;
+
+      history = secfile_lookup_int_default(loading->file, 0,
+                                           "player%d.culture",
+                                           plrno);
+
+      if (history > 0) {
+        /* Savefile had player history value saved to field named 'culture'.
+         * Save it to 'history'. */
+        secfile_insert_int(loading->file, history, "player%d.history", plrno);
+      }
+    } player_slots_iterate_end;
+
+    {
+      int action_count;
+
+      action_count = secfile_lookup_int_default(loading->file, 0,
+                                                "savefile.action_size");
+      if (action_count > 0) {
+        const char **modname;
+        const char **modname_new;
+        const char *plant_name = "Plant";
+        const char *cultivate_name = "Cultivate";
+        int j;
+
+        modname = secfile_lookup_str_vec(loading->file, &loading->action.size,
+                                         "savefile.action_vector");
+
+        modname_new = fc_calloc(action_count, sizeof(*modname_new));
+
+        for (j = 0; j < action_count; j++) {
+          const char *aname = modname[j];
+
+          if (!fc_strcasecmp("Mine TF", aname)) {
+            modname_new[j] = plant_name;
+          } else if (!fc_strcasecmp("Irrigate TF", aname)) {
+            modname_new[j] = cultivate_name;
+          } else {
+            modname_new[j] = aname;
+          }
+        }
+
+        secfile_replace_str_vec(loading->file, modname_new, action_count,
+                                "savefile.action_vector");
+
+        free(modname_new);
+      }
+    }
+
+    /* Actions are now stored by number. */
+    player_slots_iterate(pslot) {
+      int unit;
+      int units_num;
+      int plrno = player_slot_index(pslot);
+
+      if (secfile_section_lookup(loading->file, "player%d", plrno)
+          == NULL) {
+        continue;
+      }
+
+      /* Number of units the player has. */
+      units_num = secfile_lookup_int_default(loading->file, 0,
+                                             "player%d.nunits",
+                                             plrno);
+
+      for (unit = 0; unit < units_num; unit++) {
+        const char *action_unitstr;
+        int order_len;
+
+        order_len = secfile_lookup_int_default(loading->file, 0,
+                                               "player%d.u%d.orders_length",
+                                               plrno, unit);
+
+        if ((action_unitstr = secfile_lookup_str_default(loading->file, "",
+                                                         "player%d.u%d.action_list",
+                                                         plrno, unit))) {
+          int order_num;
+
+          if (order_len > strlen(action_unitstr)) {
+            order_len = strlen(action_unitstr);
+          }
+
+          for (order_num = 0; order_num < order_len; order_num++) {
+            int unconverted_action_id;
+
+            if (action_unitstr[order_num] == '?') {
+              unconverted_action_id = -1;
+            } else {
+              unconverted_action_id = char2num(action_unitstr[order_num]);
+            }
+
+            if (order_num == 0) {
+              /* The start of a vector has no number. */
+              secfile_insert_int(loading->file, unconverted_action_id,
+                                 "player%d.u%d.action_vec",
+                                 plrno, unit);
+            } else {
+              secfile_insert_int(loading->file, unconverted_action_id,
+                                 "player%d.u%d.action_vec,%d",
+                                 plrno, unit, order_num);
+            }
+          }
+        }
+      }
+    } player_slots_iterate_end;
+    player_slots_iterate(pslot) {
+      int city;
+      int city_num;
+      int plrno = player_slot_index(pslot);
+
+      if (secfile_section_lookup(loading->file, "player%d", plrno)
+          == NULL) {
+        continue;
+      }
+
+      /* Number of cities the player has. */
+      city_num = secfile_lookup_int_default(loading->file, 0,
+                                            "player%d.ncities",
+                                            plrno);
+
+      for (city = 0; city < city_num; city++) {
+        const char *action_citystr;
+        int order_len;
+
+        order_len = secfile_lookup_int_default(loading->file, 0,
+                                               "player%d.c%d.rally_point_length",
+                                               plrno, city);
+
+        if ((action_citystr = secfile_lookup_str_default(loading->file, "",
+                                                         "player%d.c%d.rally_point_actions",
+                                                         plrno, city))) {
+          int order_num;
+
+          if (order_len > strlen(action_citystr)) {
+            order_len = strlen(action_citystr);
+          }
+
+          for (order_num = 0; order_num < order_len; order_num++) {
+            int unconverted_action_id;
+
+            if (action_citystr[order_num] == '?') {
+              unconverted_action_id = -1;
+            } else {
+              unconverted_action_id = char2num(action_citystr[order_num]);
+            }
+
+            if (order_num == 0) {
+              /* The start of a vector has no number. */
+              secfile_insert_int(loading->file, unconverted_action_id,
+                                 "player%d.c%d.rally_point_action_vec",
+                                 plrno, city);
+            } else {
+              secfile_insert_int(loading->file, unconverted_action_id,
+                                 "player%d.c%d.rally_point_action_vec,%d",
+                                 plrno, city, order_num);
+            }
+          }
+        }
+      }
+    } player_slots_iterate_end;
+  } /* Version < 3.0.92 */
+
+  if (game_version < 3009300) {
+    /* Before version number bump to 3.0.93 */
+
+    /* Explicit server side agent was new in 3.1 */
+    insert_server_side_agent(loading, SAVEGAME_3);
+  } /* Version < 3.0.93 */
 
 #endif /* FREECIV_DEV_SAVE_COMPAT_3_1 */
+}
+
+/************************************************************************//**
+  Update loaded game data from earlier development version to something
+  usable by current Freeciv.
+****************************************************************************/
+static void compat_post_load_dev(struct loaddata *loading)
+{
+  int game_version;
+
+  /* Check status and return if not OK (sg_success != TRUE). */
+  sg_check_ret();
+
+  if (!secfile_lookup_int(loading->file, &game_version, "scenario.game_version")) {
+    game_version = 2060000;
+  }
+
+  if (game_version < 3009300) {
+    players_iterate_alive(pplayer) {
+      unit_list_iterate(pplayer->units, punit) {
+        int i;
+
+        if (!punit->has_orders) {
+          continue;
+        }
+
+        fc_assert_action(punit->orders.length == 0
+                         || punit->orders.list != NULL, continue);
+
+        for (i = 0; i < punit->orders.length; i++) {
+          /* "Attack" was split in "Suicide Attack" and "Attack" in 3.1. */
+          if (punit->orders.list[i].order == ORDER_PERFORM_ACTION
+              && punit->orders.list[i].action == ACTION_ATTACK
+              && !unit_can_do_action(punit, ACTION_ATTACK)
+              && unit_can_do_action(punit, ACTION_SUICIDE_ATTACK)) {
+            punit->orders.list[i].action = ACTION_SUICIDE_ATTACK;
+          }
+        }
+      } unit_list_iterate_end;
+    } players_iterate_alive_end;
+
+    /* Explicit server side agent was new in 3.1 */
+    upgrade_server_side_agent(loading);
+
+    /* Some activities should only be ordered in action orders. */
+    players_iterate_alive(pplayer) {
+      unit_list_iterate(pplayer->units, punit) {
+        unit_order_activity_to_action(punit);
+      } unit_list_iterate_end;
+    } players_iterate_alive_end;
+
+    /* Unit order action target isn't dir anymore */
+    players_iterate_alive(pplayer) {
+      unit_list_iterate(pplayer->units, punit) {
+        upgrade_unit_order_targets(punit);
+      } unit_list_iterate_end;
+    } players_iterate_alive_end;
+
+    /* Backward compatibility: if we had any open-ended orders (pillage)
+     * in the savegame, assign specific targets now */
+    players_iterate_alive(pplayer) {
+      unit_list_iterate(pplayer->units, punit) {
+        unit_assign_specific_activity_target(punit,
+                                             &punit->activity,
+                                             &punit->activity_target);
+      } unit_list_iterate_end;
+    } players_iterate_alive_end;
+  } /* Version < 3.0.93 */
 }
 #endif /* FREECIV_DEV_SAVE_COMPAT */
 
@@ -1821,6 +2220,26 @@ enum barbarian_type barb_type_convert(int old_type)
   }
 
   return barbarian_type_invalid();
+}
+
+/**********************************************************************//**
+  Assign a new base building task to unit
+**************************************************************************/
+void set_unit_activity_base(struct unit *punit,
+                            Base_type_id base)
+{
+  set_unit_activity_targeted(punit, ACTIVITY_BASE,
+                             base_extra_get(base_by_number(base)));
+}
+
+/**********************************************************************//**
+  Assign a new road building task to unit
+**************************************************************************/
+void set_unit_activity_road(struct unit *punit,
+                            Road_type_id road)
+{
+  set_unit_activity_targeted(punit, ACTIVITY_GEN_ROAD,
+                             road_extra_get(road_by_number(road)));
 }
 
 /************************************************************************//**

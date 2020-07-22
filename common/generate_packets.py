@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 #
 # Freeciv - Copyright (C) 2003 - Raimar Falke
@@ -30,8 +30,8 @@ fold_bool_into_header=1
 
 ################# END OF PARAMETERS ####################
 
-# This program runs under python 1.5 and 2.2 and hopefully every
-# version in between. Please leave it so. In particular use the string
+# This program runs under any python version since 1.5.
+# Please leave it so. In particular use the string
 # module and not the function of the string type.
 
 import re, string, os, sys
@@ -265,6 +265,8 @@ class Field:
             return "  differ = !BV_ARE_EQUAL(old->%(name)s, real_packet->%(name)s);"%self.__dict__
         if self.dataio_type in ["string", "estring"] and self.is_array==1:
             return "  differ = (strcmp(old->%(name)s, real_packet->%(name)s) != 0);"%self.__dict__
+        if self.dataio_type == "cm_parameter":
+            return "  differ = !cm_are_parameter_equal(&old->%(name)s, &real_packet->%(name)s);" % self.__dict__
         if self.is_struct and self.is_array==0:
             return "  differ = !are_%(dataio_type)ss_equal(&old->%(name)s, &real_packet->%(name)s);"%self.__dict__
         if not self.is_array:
@@ -284,6 +286,7 @@ class Field:
       differ = (%(array_size_o)s != %(array_size_u)s);
       if (!differ) {
         int i;
+
         for (i = 0; i < %(array_size_u)s; i++) {
           if (%(c)s) {
             differ = TRUE;
@@ -358,7 +361,7 @@ class Field:
         if self.struct_type=="float" and not self.is_array:
             return "  DIO_PUT(%(dataio_type)s, &dout, &field_addr, real_packet->%(name)s, %(float_factor)d);"%self.__dict__
 
-        if self.dataio_type in ["worklist"]:
+        if self.dataio_type in ["worklist", "cm_parameter"]:
             return "  DIO_PUT(%(dataio_type)s, &dout, &field_addr, &real_packet->%(name)s);"%self.__dict__
 
         if self.dataio_type in ["memory"]:
@@ -1614,7 +1617,7 @@ def get_packet_name(packets):
 
     extro='''  };
 
-  return (type >= 0 && type < PACKET_LAST ? names[type] : "unknown");
+  return (type < PACKET_LAST ? names[type] : "unknown");
 }
 
 '''
@@ -1647,7 +1650,7 @@ def get_packet_has_game_info_flag(packets):
 
     extro='''  };
 
-  return (type >= 0 && type < PACKET_LAST ? flag[type] : FALSE);
+  return (type < PACKET_LAST ? flag[type] : FALSE);
 }
 
 '''
@@ -1898,6 +1901,10 @@ extern "C" {
 /* common */
 #include "actions.h"
 #include "disaster.h"
+#include "unit.h"
+
+/* common/aicore */
+#include "cm.h"
 
 ''')
 

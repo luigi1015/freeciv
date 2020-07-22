@@ -157,7 +157,7 @@ static bool usdlg_tab_update(struct unit_select_dialog *pdialog,
                              enum unit_select_location_mode loc);
 static void usdlg_tab_append_utype(GtkTreeStore *store,
                                    enum unit_select_location_mode loc,
-                                   struct unit_type *putype,
+                                   const struct unit_type *putype,
                                    GtkTreeIter *it);
 static void usdlg_tab_append_activity(GtkTreeStore *store,
                                       enum unit_select_location_mode loc,
@@ -677,7 +677,7 @@ static bool usdlg_tab_update(struct unit_select_dialog *pdialog,
 *****************************************************************************/
 static void usdlg_tab_append_utype(GtkTreeStore *store,
                                    enum unit_select_location_mode loc,
-                                   struct unit_type *putype,
+                                   const struct unit_type *putype,
                                    GtkTreeIter *it)
 {
   GdkPixbuf *pix;
@@ -1272,6 +1272,13 @@ static void usdlg_cmd_cursor_changed(GtkTreeView *view, gpointer data)
     }
 
     cmd_status[USDLG_CMD_CENTER] = TRUE;
+    break;
+
+  default:
+    fc_assert(FALSE);
+    for (cmd_id = 0; cmd_id < USDLG_CMD_LAST; cmd_id++) {
+      cmd_status[cmd_id] = FALSE;
+    }
     break;
   }
 

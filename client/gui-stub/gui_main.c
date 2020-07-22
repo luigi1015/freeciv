@@ -117,7 +117,7 @@ void gui_options_extra_init(void)
 /**********************************************************************//**
   Do any necessary UI-specific cleanup
 **************************************************************************/
-void gui_ui_exit()
+void gui_ui_exit(void)
 {
   /* PORTME */
 }
@@ -272,12 +272,4 @@ void gui_gui_update_font(const char *font_name, const char *font_value)
 void gui_insert_client_build_info(char *outbuf, size_t outlen)
 {
   /* PORTME */
-}
-
-/**********************************************************************//**
-  Make dynamic adjustments to first-launch default options.
-**************************************************************************/
-void gui_adjust_default_options(void)
-{
-  /* Nothing in case of this gui */
 }

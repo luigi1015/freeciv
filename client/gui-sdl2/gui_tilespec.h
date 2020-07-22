@@ -110,7 +110,7 @@ struct Theme {
   SDL_Surface *ODisband_Icon;
   SDL_Surface *OWait_Icon;
   SDL_Surface *ODone_Icon;
-  SDL_Surface *OAutoAtt_Icon;
+  SDL_Surface *OAutoAtt_Icon; /* currently unused */
   SDL_Surface *OAutoExp_Icon;
   SDL_Surface *OAutoSett_Icon;
   SDL_Surface *OAutoConnect_Icon;
@@ -126,6 +126,8 @@ struct Theme {
   SDL_Surface *OFortify_Icon;
   SDL_Surface *OSentry_Icon;
   SDL_Surface *OIrrigation_Icon;
+  SDL_Surface *OCultivate_Icon;
+  SDL_Surface *OPlant_Icon;
   SDL_Surface *ORoad_Icon;
   SDL_Surface *ORailRoad_Icon;
   SDL_Surface *OPillage_Icon;
@@ -237,7 +239,7 @@ static inline SDL_Surface *get_sample_city_surface(int city_style)
   return GET_SURF(get_sample_city_sprite(tileset, city_style));
 }
 
-static inline SDL_Surface *get_building_surface(struct impr_type *pimprove)
+static inline SDL_Surface *get_building_surface(const struct impr_type *pimprove)
 {
   return GET_SURF(get_building_sprite(tileset, pimprove));
 }

@@ -37,7 +37,6 @@ struct gui_funcs {
 
   enum gui_type (*get_gui_type)(void);
   void (*insert_client_build_info)(char *outbuf, size_t outlen);
-  void (*adjust_default_options)(void);
 
   void (*version_message)(const char *vertext);
   void (*real_output_window_append)(const char *astring,
@@ -126,6 +125,7 @@ struct gui_funcs {
                             int attacker_hp, int defender_hp,
                             bool make_att_veteran, bool make_def_veteran);
   void (*update_timeout_label)(void);
+  void (*start_turn)(void);
   void (*real_city_dialog_popup)(struct city *pcity);
   void (*real_city_dialog_refresh)(struct city *pcity);
   void (*popdown_city_dialog)(struct city *pcity);

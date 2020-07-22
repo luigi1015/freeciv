@@ -58,6 +58,20 @@ struct cargo_iter {
 #define CARGO_ITER(iter) ((struct cargo_iter *) (iter))
 
 /**********************************************************************//**
+  Checks unit orders for equality.
+**************************************************************************/
+bool are_unit_orders_equal(const struct unit_order *order1,
+                           const struct unit_order *order2)
+{
+  return order1->order == order2->order
+      && order1->activity == order2->activity
+      && order1->target == order2->target
+      && order1->sub_target == order2->sub_target
+      && order1->action == order2->action
+      && order1->dir == order2->dir;
+}
+
+/**********************************************************************//**
   Determines if punit can be airlifted to dest_city now!  So punit needs
   to be in a city now.
   If pdest_city is NULL, just indicate whether it's possible for the unit
@@ -138,7 +152,8 @@ enum unit_airlift_result
        * or no airport).
        *
        * Note that (game.info.airlifting_style & AIRLIFTING_UNLIMITED_SRC)
-       * is not handled here because it always needs an airport to airlift.
+       * is not handled here because it applies only when the source city
+       * has at least one remaining airlift.
        * See also do_airline() in server/unittools.h. */
       return AR_SRC_NO_FLIGHTS;
     } /* else, there is capacity; continue to other checks */
@@ -195,6 +210,50 @@ bool unit_has_orders(const struct unit *punit)
 }
 
 /**********************************************************************//**
+  Returns how many shields the unit (type) is worth.
+  @param punit     the unit. Can be NULL if punittype is set.
+  @param punittype the unit's type. Can be NULL iff punit is set.
+  @param paction   the action the unit does when valued.
+  @return the unit's value in shields.
+**************************************************************************/
+int unit_shield_value(const struct unit *punit,
+                      const struct unit_type *punittype,
+                      const struct action *paction)
+{
+  int value;
+
+  bool has_unit;
+  const struct player *act_player;
+
+  has_unit = punit != NULL;
+
+  if (has_unit && punittype == NULL) {
+    punittype = unit_type_get(punit);
+  }
+
+  fc_assert_ret_val(punittype != NULL, 0);
+  fc_assert(punit == NULL || unit_type_get(punit) == punittype);
+  fc_assert_ret_val(paction != NULL, 0);
+
+  act_player = has_unit ? unit_owner(punit) : NULL;
+  /* TODO: determine if tile and city should be where the unit currently is
+   * located or the target city. Those two may differ. Wait for ruleset
+   * author feed back. */
+
+  value = utype_build_shield_cost_base(punittype);
+  value += ((value
+             * get_target_bonus_effects(NULL,
+                                        act_player, NULL,
+                                        NULL, NULL, NULL,
+                                        punit, punittype,
+                                        NULL, NULL, paction,
+                                        EFT_UNIT_SHIELD_VALUE_PCT))
+            / 100);
+
+  return value;
+}
+
+/**********************************************************************//**
   Return TRUE unless it is known to be imposible to disband this unit at
   its current position to get full shields for building a wonder.
 **************************************************************************/
@@ -246,7 +305,9 @@ int get_transporter_capacity(const struct unit *punit)
 **************************************************************************/
 bool is_attack_unit(const struct unit *punit)
 {
-  return (unit_type_get(punit)->attack_strength > 0);
+  return ((unit_can_do_action_result(punit, ACTRES_ATTACK)
+           || unit_can_do_action_result(punit, ACTRES_BOMBARD))
+          && unit_type_get(punit)->attack_strength > 0);
 }
 
 /**********************************************************************//**
@@ -267,6 +328,16 @@ bool unit_can_do_action(const struct unit *punit,
                         const action_id act_id)
 {
   return utype_can_do_action(unit_type_get(punit), act_id);
+}
+
+/**********************************************************************//**
+  Return TRUE iff this unit can do any enabler controlled action with the
+  specified action result.
+**************************************************************************/
+bool unit_can_do_action_result(const struct unit *punit,
+                               enum action_result result)
+{
+  return utype_can_do_action_result(unit_type_get(punit), result);
 }
 
 /**********************************************************************//**
@@ -522,7 +593,7 @@ static bool is_real_activity(enum unit_activity activity)
 {
   /* ACTIVITY_FORTRESS, ACTIVITY_AIRBASE, ACTIVITY_OLD_ROAD, and
    * ACTIVITY_OLD_RAILROAD are deprecated */
-  return (0 <= activity && activity < ACTIVITY_LAST)
+  return (activity < ACTIVITY_LAST)
           && activity != ACTIVITY_FORTRESS
           && activity != ACTIVITY_AIRBASE
           && activity != ACTIVITY_OLD_ROAD
@@ -546,8 +617,9 @@ const char *get_activity_text(enum unit_activity activity)
     return _("Pollution");
   case ACTIVITY_MINE:
     /* TRANS: Activity name, verb in English */
-    return _("Plant");
+    return _("Mine");
   case ACTIVITY_PLANT:
+    /* TRANS: Activity name, verb in English */
     return _("Plant");
   case ACTIVITY_IRRIGATE:
     return _("Irrigate");
@@ -689,6 +761,34 @@ bool can_unit_unload(const struct unit *pcargo, const struct unit *ptrans)
 }
 
 /**********************************************************************//**
+  Return TRUE iff the given unit can leave its current transporter without
+  doing any other action or move.
+**************************************************************************/
+bool can_unit_alight_or_be_unloaded(const struct unit *pcargo,
+                                    const struct unit *ptrans)
+{
+  if (!pcargo || !ptrans) {
+    return FALSE;
+  }
+
+  fc_assert_ret_val(unit_transport_get(pcargo) == ptrans, FALSE);
+
+  if (is_server()) {
+    return (is_action_enabled_unit_on_unit(ACTION_TRANSPORT_ALIGHT,
+                                           pcargo, ptrans)
+            || is_action_enabled_unit_on_unit(ACTION_TRANSPORT_UNLOAD,
+                                              ptrans, pcargo));
+  } else {
+    return (action_prob_possible(
+              action_prob_vs_unit(pcargo, ACTION_TRANSPORT_ALIGHT, ptrans))
+            || action_prob_possible(
+              action_prob_vs_unit(ptrans, ACTION_TRANSPORT_UNLOAD,
+                                  pcargo)));
+  }
+}
+
+
+/**********************************************************************//**
   Return whether the unit can be paradropped - that is, if the unit is in
   a friendly city or on an airbase special, has enough movepoints left, and
   has not paradropped yet this turn.
@@ -792,6 +892,10 @@ bool can_unit_do_activity_targeted_at(const struct unit *punit,
   /* FIXME: Should check also the cases where one of the activities is terrain
    *        change that destroys the target of the other activity */
   if (target != NULL && is_build_activity(activity, ptile)) {
+    if (tile_is_placing(ptile)) {
+      return FALSE;
+    }
+
     unit_list_iterate(ptile->units, tunit) {
       if (is_build_activity(tunit->activity, ptile)
           && !can_extras_coexist(target, tunit->activity_target)) {
@@ -806,95 +910,23 @@ bool can_unit_do_activity_targeted_at(const struct unit *punit,
     return TRUE;
 
   case ACTIVITY_POLLUTION:
-    {
-      struct extra_type *pextra;
-
-      if (pterrain->clean_pollution_time == 0) {
-        return FALSE;
-      }
-
-      if (target != NULL) {
-        pextra = target;
-      } else {
-        /* TODO: Make sure that all callers set target so that
-         * we don't need this fallback. */
-        pextra = prev_extra_in_tile(ptile,
-                                    ERM_CLEANPOLLUTION,
-                                    unit_owner(punit),
-                                    punit);
-        if (pextra == NULL) {
-          /* No available pollution extras */
-          return FALSE;
-        }
-      }
-
-      if (!is_extra_removed_by(pextra, ERM_CLEANPOLLUTION)) {
-        return FALSE;
-      }
-
-      if (!unit_has_type_flag(punit, UTYF_SETTLERS)
-          || !can_remove_extra(pextra, punit, ptile)) {
-        return FALSE;
-      }
-
-      if (tile_has_extra(ptile, pextra)) {
-        return TRUE;
-      }
-
-      return FALSE;
-    }
+    /* The call below doesn't support actor tile speculation. */
+    fc_assert_msg(unit_tile(punit) == ptile,
+                  "Please use action_speculate_unit_on_tile()");
+    return is_action_enabled_unit_on_tile(ACTION_CLEAN_POLLUTION,
+                                          punit, ptile, target);
 
   case ACTIVITY_FALLOUT:
-    {
-      struct extra_type *pextra;
-
-      if (pterrain->clean_fallout_time == 0) {
-        return FALSE;
-      }
-
-      if (target != NULL) {
-        pextra = target;
-      } else {
-        /* TODO: Make sure that all callers set target so that
-         * we don't need this fallback. */
-        pextra = prev_extra_in_tile(ptile,
-                                    ERM_CLEANFALLOUT,
-                                    unit_owner(punit),
-                                    punit);
-        if (pextra == NULL) {
-          /* No available pollution extras */
-          return FALSE;
-        }
-      }
-
-      if (!is_extra_removed_by(pextra, ERM_CLEANFALLOUT)) {
-        return FALSE;
-      }
-
-      if (!unit_has_type_flag(punit, UTYF_SETTLERS)
-          || !can_remove_extra(pextra, punit, ptile)) {
-        return FALSE;
-      }
-
-      if (tile_has_extra(ptile, pextra)) {
-        return TRUE;
-      }
-
-      return FALSE;
-    }
+    /* The call below doesn't support actor tile speculation. */
+    fc_assert_msg(unit_tile(punit) == ptile,
+                  "Please use action_speculate_unit_on_tile()");
+    return is_action_enabled_unit_on_tile(ACTION_CLEAN_FALLOUT,
+                                          punit, ptile, target);
 
   case ACTIVITY_MINE:
     if (pterrain->mining_result != pterrain
         && pterrain->mining_result != T_NONE) {
-      if (target != NULL) {
-        return FALSE;
-      }
-
-      /* The call below doesn't support actor tile speculation. */
-      fc_assert_msg(unit_tile(punit) == ptile,
-                    "Please use action_speculate_unit_on_tile()");
-      return is_action_enabled_unit_on_tile(ACTION_PLANT,
-                                            punit, ptile, NULL);
+      return FALSE;
     } else if (pterrain->mining_result == pterrain) {
       /* The call below doesn't support actor tile speculation. */
       fc_assert_msg(unit_tile(punit) == ptile,
@@ -920,15 +952,7 @@ bool can_unit_do_activity_targeted_at(const struct unit *punit,
   case ACTIVITY_IRRIGATE:
     if (pterrain->irrigation_result != pterrain
         && pterrain->irrigation_result != T_NONE) {
-      if (target != NULL) {
-        return FALSE;
-      }
-
-      /* The call below doesn't support actor tile speculation. */
-      fc_assert_msg(unit_tile(punit) == ptile,
-                    "Please use action_speculate_unit_on_tile()");
-      return is_action_enabled_unit_on_tile(ACTION_CULTIVATE,
-                                            punit, ptile, NULL);
+      return FALSE;
     } else if (pterrain->irrigation_result == pterrain) {
       /* The call below doesn't support actor tile speculation. */
       fc_assert_msg(unit_tile(punit) == ptile,
@@ -1069,34 +1093,6 @@ void set_unit_activity_targeted(struct unit *punit,
   punit->activity_target = new_target;
   if (new_activity == punit->changed_from
       && new_target == punit->changed_from_target) {
-    punit->activity_count = punit->changed_from_count;
-  }
-}
-
-/**********************************************************************//**
-  Assign a new base building task to unit
-**************************************************************************/
-void set_unit_activity_base(struct unit *punit,
-                            Base_type_id base)
-{
-  set_unit_activity_internal(punit, ACTIVITY_BASE);
-  punit->activity_target = base_extra_get(base_by_number(base));
-  if (ACTIVITY_BASE == punit->changed_from
-      && punit->activity_target == punit->changed_from_target) {
-    punit->activity_count = punit->changed_from_count;
-  }
-}
-
-/**********************************************************************//**
-  Assign a new road building task to unit
-**************************************************************************/
-void set_unit_activity_road(struct unit *punit,
-                            Road_type_id road)
-{
-  set_unit_activity_internal(punit, ACTIVITY_GEN_ROAD);
-  punit->activity_target = road_extra_get(road_by_number(road));
-  if (ACTIVITY_GEN_ROAD == punit->changed_from
-      && punit->activity_target == punit->changed_from_target) {
     punit->activity_count = punit->changed_from_count;
   }
 }
@@ -1482,23 +1478,9 @@ bool unit_being_aggressive(const struct unit *punit)
 **************************************************************************/
 bool is_build_activity(enum unit_activity activity, const struct tile *ptile)
 {
-  struct terrain *pterr = NULL;
-
-  if (ptile != NULL) {
-    pterr = tile_terrain(ptile);
-  }
-
   switch (activity) {
   case ACTIVITY_MINE:
-    if (pterr != NULL && pterr->mining_result != pterr) {
-      return FALSE;
-    }
-    return TRUE;
   case ACTIVITY_IRRIGATE:
-    if (pterr != NULL && pterr->irrigation_result != pterr) {
-      return FALSE;
-    }
-    return TRUE;
   case ACTIVITY_BASE:
   case ACTIVITY_GEN_ROAD:
     return TRUE;
@@ -1523,13 +1505,28 @@ bool is_clean_activity(enum unit_activity activity)
 }
 
 /**********************************************************************//**
+  Returns true if given activity changes terrain.
+**************************************************************************/
+bool is_terrain_change_activity(enum unit_activity activity)
+{
+  switch (activity) {
+  case ACTIVITY_CULTIVATE:
+  case ACTIVITY_PLANT:
+  case ACTIVITY_TRANSFORM:
+    return TRUE;
+  default:
+    return FALSE;
+  }
+}
+
+/**********************************************************************//**
   Returns true if given activity affects tile.
 **************************************************************************/
 bool is_tile_activity(enum unit_activity activity)
 {
   return is_build_activity(activity, NULL)
     || is_clean_activity(activity)
-    || activity == ACTIVITY_TRANSFORM;
+    || is_terrain_change_activity(activity);
 }
 
 /**********************************************************************//**
@@ -1537,7 +1534,7 @@ bool is_tile_activity(enum unit_activity activity)
   to set tile and homecity yourself.
 **************************************************************************/
 struct unit *unit_virtual_create(struct player *pplayer, struct city *pcity,
-                                 struct unit_type *punittype,
+                                 const struct unit_type *punittype,
                                  int veteran_level)
 {
   /* Make sure that contents of unit structure are correctly initialized,
@@ -1576,7 +1573,7 @@ struct unit *unit_virtual_create(struct player *pplayer, struct city *pcity,
   punit->moves_left = unit_move_rate(punit);
   punit->moved = FALSE;
 
-  punit->ai_controlled = FALSE;
+  punit->ssa_controller = SSA_NONE;
   punit->paradropped = FALSE;
   punit->done_moving = FALSE;
 
@@ -1679,6 +1676,7 @@ void free_unit_orders(struct unit *punit)
     free(punit->orders.list);
     punit->orders.list = NULL;
   }
+  punit->orders.length = 0;
   punit->has_orders = FALSE;
 }
 
@@ -1863,8 +1861,8 @@ enum unit_upgrade_result unit_upgrade_test(const struct unit *punit,
                                            bool is_free)
 {
   struct player *pplayer = unit_owner(punit);
-  struct unit_type *to_unittype = can_upgrade_unittype(pplayer,
-                                                       unit_type_get(punit));
+  const struct unit_type *to_unittype = can_upgrade_unittype(pplayer,
+                                                             unit_type_get(punit));
   struct city *pcity;
   int cost;
 
@@ -1912,7 +1910,7 @@ enum unit_upgrade_result unit_upgrade_test(const struct unit *punit,
 **************************************************************************/
 bool unit_can_convert(const struct unit *punit)
 {
-  struct unit_type *tgt = unit_type_get(punit)->converted_to;
+  const struct unit_type *tgt = unit_type_get(punit)->converted_to;
 
   if (tgt == NULL) {
     return FALSE;
@@ -1939,9 +1937,9 @@ enum unit_upgrade_result unit_upgrade_info(const struct unit *punit,
   struct player *pplayer = unit_owner(punit);
   enum unit_upgrade_result result = unit_upgrade_test(punit, FALSE);
   int upgrade_cost;
-  struct unit_type *from_unittype = unit_type_get(punit);
-  struct unit_type *to_unittype = can_upgrade_unittype(pplayer,
-                                                       unit_type_get(punit));
+  const struct unit_type *from_unittype = unit_type_get(punit);
+  const struct unit_type *to_unittype = can_upgrade_unittype(pplayer,
+                                                             unit_type_get(punit));
   char tbuf[MAX_LEN_MSG];
 
   fc_snprintf(tbuf, ARRAY_SIZE(tbuf), PL_("Treasury contains %d gold.",
@@ -2007,11 +2005,34 @@ enum unit_upgrade_result unit_upgrade_info(const struct unit *punit,
 }
 
 /**********************************************************************//**
+  Returns the amount of movement points successfully performing the
+  specified action will consume in the actor unit.
+**************************************************************************/
+int unit_pays_mp_for_action(const struct action *paction,
+                            const struct unit *punit)
+{
+  int mpco;
+
+  mpco = get_target_bonus_effects(NULL,
+                                  unit_owner(punit),
+                                  NULL,
+                                  unit_tile(punit)
+                                    ? tile_city(unit_tile(punit)) : NULL,
+                                  NULL, unit_tile(punit),
+                                  punit, unit_type_get(punit), NULL, NULL,
+                                  paction, EFT_ACTION_SUCCESS_MOVE_COST);
+
+  mpco += utype_pays_mp_for_action_base(paction, unit_type_get(punit));
+
+  return mpco;
+}
+
+/**********************************************************************//**
   Does unit lose hitpoints each turn?
 **************************************************************************/
 bool is_losing_hp(const struct unit *punit)
 {
-  struct unit_type *punittype = unit_type_get(punit);
+  const struct unit_type *punittype = unit_type_get(punit);
 
   return get_unit_bonus(punit, EFT_UNIT_RECOVER)
     < (punittype->hp *

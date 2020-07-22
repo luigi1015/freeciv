@@ -59,7 +59,7 @@ typedef enum {
 
 #define ttypename(x)	luaT_typenames_[(x) + 1]
 
-LUAI_DDEC(const char *const luaT_typenames_[LUA_TOTALTAGS];)
+LUAI_DDEC(const char *const luaT_typenames_[LUA_TOTALTYPES];)
 
 
 LUAI_FUNC const char *luaT_objtypename (lua_State *L, const TValue *o);
@@ -75,8 +75,9 @@ LUAI_FUNC void luaT_callTMres (lua_State *L, const TValue *f,
                             const TValue *p1, const TValue *p2, StkId p3);
 LUAI_FUNC void luaT_trybinTM (lua_State *L, const TValue *p1, const TValue *p2,
                               StkId res, TMS event);
+LUAI_FUNC void luaT_tryconcatTM (lua_State *L);
 LUAI_FUNC void luaT_trybinassocTM (lua_State *L, const TValue *p1,
-       const TValue *p2, StkId res, int inv, TMS event);
+       const TValue *p2, int inv, StkId res, TMS event);
 LUAI_FUNC void luaT_trybiniTM (lua_State *L, const TValue *p1, lua_Integer i2,
                                int inv, StkId res, TMS event);
 LUAI_FUNC int luaT_callorderTM (lua_State *L, const TValue *p1,

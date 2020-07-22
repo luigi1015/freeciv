@@ -37,6 +37,9 @@
 #include "unit.h"
 #include "worklist.h"
 
+/* common/aicore */
+#include "cm.h"
+
 /* server */
 #include "citytools.h"
 #include "cityturn.h"
@@ -56,7 +59,6 @@
 void handle_city_name_suggestion_req(struct player *pplayer, int unit_id)
 {
   struct unit *punit = player_unit_by_number(pplayer, unit_id);
-  enum city_build_result res;
 
   if (NULL == punit) {
     /* Probably died or bribed. */
@@ -76,22 +78,11 @@ void handle_city_name_suggestion_req(struct player *pplayer, int unit_id)
     return;
   }
 
-  res = city_build_here_test(unit_tile(punit), punit);
+  log_verbose("handle_city_name_suggest_req(unit_pos (%d, %d)): "
+              "cannot build there.", TILE_XY(unit_tile(punit)));
 
-  switch (res) {
-  case CB_OK:
-    /* No action enabler permitted the city to be built. */
-  case CB_BAD_CITY_TERRAIN:
-  case CB_BAD_UNIT_TERRAIN:
-  case CB_BAD_BORDERS:
-  case CB_NO_MIN_DIST:
-    log_verbose("handle_city_name_suggest_req(unit_pos (%d, %d)): "
-                "cannot build there.", TILE_XY(unit_tile(punit)));
-
-    illegal_action_msg(pplayer, E_BAD_COMMAND, punit, ACTION_FOUND_CITY,
-                       unit_tile(punit), NULL, NULL);
-    break;
-  }
+  illegal_action_msg(pplayer, E_BAD_COMMAND, punit, ACTION_FOUND_CITY,
+                     unit_tile(punit), NULL, NULL);
 }
 
 /**********************************************************************//**
@@ -523,16 +514,17 @@ void handle_city_options_req(struct player *pplayer, int city_id,
   Handles a request to set city rally point for new units.
 **************************************************************************/
 void handle_city_rally_point(struct player *pplayer,
-                             const struct packet_city_rally_point *packet)
+                             int city_id, int length,
+                             bool persistent, bool vigilant,
+                             const struct unit_order *orders)
 {
-  int length = packet->length;
-  struct city *pcity = player_city_by_number(pplayer, packet->city_id);
-  struct unit_order *orders;
+  struct city *pcity = player_city_by_number(pplayer, city_id);
+  struct unit_order *checked_orders;
 
   if (NULL == pcity) {
     /* Probably lost. */
     log_verbose("handle_city_rally_point() bad city number %d.",
-                packet->city_id);
+                city_id);
     return;
   }
 
@@ -553,20 +545,52 @@ void handle_city_rally_point(struct player *pplayer,
       pcity->rally_point.orders = NULL;
     }
   } else {
-    orders = create_unit_orders(length, packet->orders, packet->dirs,
-                                packet->activities, packet->sub_targets,
-                                packet->actions);
-    if (!orders) {
+    checked_orders = create_unit_orders(length, orders);
+    if (!checked_orders) {
       pcity->rally_point.length = 0;
       log_error("invalid rally point orders for city number %d.",
-                packet->city_id);
+                city_id);
       return;
     }
 
-    pcity->rally_point.persistent = packet->persistent;
-    pcity->rally_point.vigilant = packet->vigilant;
-    pcity->rally_point.orders = orders;
+    pcity->rally_point.persistent = persistent;
+    pcity->rally_point.vigilant = vigilant;
+    pcity->rally_point.orders = checked_orders;
   }
 
   send_city_info(pplayer, pcity);
+}
+
+/**********************************************************************//**
+  Handles a request to set city manager parameter.
+**************************************************************************/
+void handle_city_manager(struct player *pplayer, int city_id, bool enabled,
+                         struct cm_parameter parameter)
+{
+  struct city *pcity = player_city_by_number(pplayer, city_id);
+
+  if (NULL == pcity) {
+    /* Probably lost. */
+    log_verbose("handle_city_manager() bad city number %d.", city_id);
+    return;
+  }
+
+  if (!enabled) {
+    if (pcity->cm_parameter) {
+      free(pcity->cm_parameter);
+      pcity->cm_parameter = NULL;
+      send_city_info(pplayer, pcity);
+    }
+    return;
+  }
+
+  if (!pcity->cm_parameter) {
+    pcity->cm_parameter = fc_calloc(1, sizeof(struct cm_parameter));
+  }
+
+  cm_copy_parameter(pcity->cm_parameter, &parameter);
+
+  auto_arrange_workers(pcity);
+  sync_cities();
+  return;
 }

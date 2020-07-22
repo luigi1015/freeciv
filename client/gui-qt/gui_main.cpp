@@ -70,7 +70,6 @@ static fc_client *freeciv_qt;
 static QApplication *qapp = nullptr;
 
 void reset_unit_table(void);
-static void apply_city_font(struct option *poption);
 static void apply_font(struct option *poption);
 static void apply_help_font(struct option *poption);
 static void apply_notify_font(struct option *poption);
@@ -142,13 +141,11 @@ static bool parse_options(int argc, char **argv)
 **************************************************************************/
 static void migrate_options_from_2_5()
 {
-  if (!gui_options.first_boot) {
-    log_normal(_("Migrating Qt-client options from freeciv-2.5 options."));
+  log_normal(_("Migrating Qt-client options from freeciv-2.5 options."));
 
-    gui_options.gui_qt_fullscreen = gui_options.migrate_fullscreen;
+  gui_options.gui_qt_fullscreen = gui_options.migrate_fullscreen;
 
-    gui_options.gui_qt_migrated_from_2_5 = TRUE;
-  }
+  gui_options.gui_qt_migrated_from_2_5 = TRUE;
 }
 
 /**********************************************************************//**
@@ -167,10 +164,16 @@ void qtg_ui_main(int argc, char *argv[])
     qpm = get_icon_sprite(tileset, ICON_FREECIV)->pm;
     app_icon = ::QIcon(*qpm);
     qapp->setWindowIcon(app_icon);
-    if (!gui_options.gui_qt_migrated_from_2_5) {
+    if (gui_options.first_boot) {
+      /* We're using fresh defaults for this version of this client,
+       * so prevent any future migrations from other versions */
+      gui_options.gui_qt_migrated_from_2_5 = TRUE;
+    } else if (!gui_options.gui_qt_migrated_from_2_5) {
       migrate_options_from_2_5();
     }
-    load_theme(gui_options.gui_qt_default_theme_name);
+    if (!load_theme(gui_options.gui_qt_default_theme_name)) {
+      qtg_gui_clear_theme();
+    }
     freeciv_qt = new fc_client();
     freeciv_qt->fc_main(qapp);
   }
@@ -205,13 +208,7 @@ void qtg_options_extra_init()
                           apply_font);
   option_var_set_callback(gui_qt_font_default,
                           apply_font);
-  option_var_set_callback(gui_qt_font_city_label,
-                          apply_city_font);
-  option_var_set_callback(gui_qt_font_help_label,
-                          apply_help_font);
   option_var_set_callback(gui_qt_font_help_text,
-                          apply_help_font);
-  option_var_set_callback(gui_qt_font_help_title,
                           apply_help_font);
   option_var_set_callback(gui_qt_font_chatline,
                           apply_font);
@@ -345,7 +342,7 @@ void apply_titlebar(struct option *poption)
     return;
   }
 
-  if (val == true) {
+  if (val) {
     w = new QWidget();
     gui()->setWindowFlags(flags);
     delete gui()->corner_wid;
@@ -391,6 +388,7 @@ static void apply_font(struct option *poption)
     real_science_report_dialog_update(nullptr);
     fc_font::instance()->get_mapfont_size();
   }
+  apply_help_font(poption);
 }
 
 /**********************************************************************//**
@@ -423,13 +421,6 @@ static void apply_notify_font(struct option *poption)
     qtg_gui_update_font("notify_label", option_font_get(poption));
     restart_notify_dialogs();
   }
-}
-
-/**********************************************************************//**
-  Changes city label font
-**************************************************************************/
-void apply_city_font(option *poption)
-{
   if (gui() && qtg_get_current_client_page() == PAGE_GAME) {
     qtg_gui_update_font("city_label", option_font_get(poption));
     city_font_update();
@@ -513,27 +504,21 @@ void reset_unit_table(void)
 **************************************************************************/
 void popup_quit_dialog()
 {
-  hud_message_box ask(gui()->central_wdg);
-  int ret;
+  hud_message_box *ask = new hud_message_box(gui()->central_wdg);
 
-  ask.setStandardButtons(QMessageBox::Cancel | QMessageBox::Ok);
-  ask.setDefaultButton(QMessageBox::Cancel);
-  ask.set_text_title(_("Are you sure you want to quit?"),  _("Quit?"));
-  ret = ask.exec();
-
-  switch (ret) {
-  case QMessageBox::Cancel:
-    return;
-    break;
-  case QMessageBox::Ok:
+  ask->setStandardButtons(QMessageBox::Cancel | QMessageBox::Ok);
+  ask->setDefaultButton(QMessageBox::Cancel);
+  ask->set_text_title(_("Are you sure you want to quit?"),  _("Quit?"));
+  ask->setAttribute(Qt::WA_DeleteOnClose);
+  QObject::connect(ask, &hud_message_box::accepted, [=]() {
     start_quitting();
     if (client.conn.used) {
       disconnect_from_server();
     }
     gui()->write_settings();
     qapp->quit();
-    break;
-  }
+  });
+  ask->show();
 }
 
 /**********************************************************************//**
@@ -541,20 +526,14 @@ void popup_quit_dialog()
 **************************************************************************/
 void qtg_insert_client_build_info(char *outbuf, size_t outlen)
 {
-  /* There's separate entry about Qt in help menu.
-   * Should we enable this regardless? As then to place to find such information
-   * would be standard over clients. */
+  /* There's also an separate entry about Qt in help menu. */
 
-  /*
   cat_snprintf(outbuf, outlen, _("\nBuilt against Qt %s, using %s"),
                QT_VERSION_STR, qVersion());
-  */
-}
 
-/**********************************************************************//**
-  Make dynamic adjustments to first-launch default options.
-**************************************************************************/
-void qtg_adjust_default_options()
-{
-  /* Nothing in case of this gui */
+#ifdef FC_QT6_MODE
+  cat_snprintf(outbuf, outlen, _("\nBuilt in Qt5x mode."));
+#else  /* FC_QT6_MODE */
+  cat_snprintf(outbuf, outlen, _("\nBuilt in Qt5 mode."));
+#endif /* FC_QT6_MODE */
 }

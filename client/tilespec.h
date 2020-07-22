@@ -166,6 +166,8 @@ struct drawn_sprite {
 #define SPECENUM_VALUE21NAME "WorkerTask"
 #define SPECENUM_VALUE22 LAYER_EDITOR
 #define SPECENUM_VALUE22NAME "Editor"
+#define SPECENUM_VALUE23 LAYER_INFRAWORK
+#define SPECENUM_VALUE23NAME "InfraWork"
 #define SPECENUM_COUNT LAYER_COUNT
 #include "specenum_gen.h"
 
@@ -368,7 +370,7 @@ struct sprite *get_nation_shield_sprite(const struct tileset *t,
                                         const struct nation_type *nation);
 struct sprite *get_tech_sprite(const struct tileset *t, Tech_type_id tech);
 struct sprite *get_building_sprite(const struct tileset *t,
-                                   struct impr_type *pimprove);
+                                   const struct impr_type *pimprove);
 struct sprite *get_government_sprite(const struct tileset *t,
                                      const struct government *gov);
 struct sprite *get_unittype_sprite(const struct tileset *t,

@@ -146,7 +146,7 @@ static bool can_plr_see_all_sym_diplrels_of(const struct player *pplayer,
 }
 
 /**********************************************************************//**
-  Is an evalutaion of the requirement accurate when pow_player evaluates
+  Is an evaluation of the requirement accurate when pow_player evaluates
   it?
 
   TODO: Move the data to a data file. That will
@@ -211,9 +211,12 @@ static bool is_req_knowable(const struct player *pow_player,
     case USP_DOMESTIC_TILE:
     case USP_TRANSPORTING:
     case USP_NATIVE_TILE:
+    case USP_NATIVE_EXTRA:
       /* Known if the unit is seen by the player. */
       return target_unit && can_player_see_unit(pow_player, target_unit);
     case USP_HAS_HOME_CITY:
+    case USP_MOVED_THIS_TURN:
+      /* Known to the unit's owner. */
       return target_unit && unit_owner(target_unit) == pow_player;
     case USP_COUNT:
       fc_assert_msg(req->source.value.unit_state != USP_COUNT,
@@ -248,6 +251,27 @@ static bool is_req_knowable(const struct player *pow_player,
     case REQ_RANGE_COUNT:
       /* Invalid range */
       return FALSE;
+    }
+  }
+
+  if (req->source.kind == VUT_ACTIVITY) {
+    fc_assert_ret_val_msg(req->range == REQ_RANGE_LOCAL,
+                          FALSE, "Wrong range");
+
+    if (target_unit == NULL) {
+      /* The unit may exist but not be passed when the problem type is
+       * RPT_POSSIBLE. */
+      return prob_type == RPT_CERTAIN;
+    }
+
+    if (unit_owner(target_unit) == pow_player) {
+      return TRUE;
+    }
+
+    if (req->source.value.activity != ACTIVITY_EXPLORE
+        && (req->source.value.activity != ACTIVITY_GOTO)) {
+      /* Sent in package_short_unit() */
+      return can_player_see_unit(pow_player, target_unit);
     }
   }
 

@@ -31,6 +31,7 @@
 #include "citizens.h"
 #include "clientutils.h"
 #include "combat.h"
+#include "culture.h"
 #include "fc_types.h" /* LINE_BREAK */
 #include "game.h"
 #include "government.h"
@@ -278,15 +279,19 @@ const char *popup_info_text(struct tile *ptile)
       int count = unit_list_size(ptile->units);
 
       if (count > 0) {
+        /* TRANS: preserve leading space */
         astr_add(&str, PL_(" | Occupied with %d unit.",
                                 " | Occupied with %d units.", count), count);
       } else {
+        /* TRANS: preserve leading space */
         astr_add(&str, _(" | Not occupied."));
       }
     } else {
       if (city_is_occupied(pcity)) {
+        /* TRANS: preserve leading space */
         astr_add(&str, _(" | Occupied."));
       } else {
+        /* TRANS: preserve leading space */
         astr_add(&str, _(" | Not occupied."));
       }
     }
@@ -333,7 +338,7 @@ const char *popup_info_text(struct tile *ptile)
   }
   if (punit && !pcity) {
     struct player *owner = unit_owner(punit);
-    struct unit_type *ptype = unit_type_get(punit);
+    const struct unit_type *ptype = unit_type_get(punit);
 
     get_full_username(username, sizeof(username), owner);
     get_full_nation(nation, sizeof(nation), owner);
@@ -500,7 +505,7 @@ const char *unit_description(struct unit *punit)
   struct city *pcity =
       player_city_by_number(owner, punit->homecity);
   struct city *pcity_near = get_nearest_city(punit, &pcity_near_dist);
-  struct unit_type *ptype = unit_type_get(punit);
+  const struct unit_type *ptype = unit_type_get(punit);
   static struct astring str = ASTRING_INIT;
   const struct player *pplayer = client_player();
 
@@ -1005,8 +1010,14 @@ const char *get_info_label_text_popup(void)
       fc_assert(upkeep == 0);
       astr_add_line(&str, _("Bulbs per turn: %d"), perturn);
     }
-
-    astr_add_line(&str, _("Total culture: %d"), client.conn.playing->client.culture);
+    {
+      int history_perturn = nation_history_gain(client.conn.playing);
+      city_list_iterate(client.conn.playing->cities, pcity) {
+        history_perturn += city_history_gain(pcity);
+      } city_list_iterate_end;
+      astr_add_line(&str, _("Culture: %d (%+d/turn)"),
+                    client.conn.playing->client.culture, history_perturn);
+    }
   }
 
   /* See also get_global_warming_tooltip and get_nuclear_winter_tooltip. */
@@ -1256,15 +1267,15 @@ bool get_units_upgrade_info(char *buf, size_t bufsz,
     unit_list_iterate(punits, punit) {
       if (unit_owner(punit) == client_player()
           && UU_OK == unit_upgrade_test(punit, FALSE)) {
-	struct unit_type *from_unittype = unit_type_get(punit);
-	struct unit_type *to_unittype = can_upgrade_unittype(client.conn.playing,
-							     from_unittype);
-	int cost = unit_upgrade_price(unit_owner(punit),
-					   from_unittype, to_unittype);
+        const struct unit_type *from_unittype = unit_type_get(punit);
+        const struct unit_type *to_unittype = can_upgrade_unittype(client.conn.playing,
+                                                                   from_unittype);
+        int cost = unit_upgrade_price(unit_owner(punit),
+                                      from_unittype, to_unittype);
 
-	num_upgraded++;
-	upgrade_cost += cost;
-	min_upgrade_cost = MIN(min_upgrade_cost, cost);
+        num_upgraded++;
+        upgrade_cost += cost;
+        min_upgrade_cost = MIN(min_upgrade_cost, cost);
       }
     } unit_list_iterate_end;
     if (num_upgraded == 0) {
@@ -1660,6 +1671,76 @@ const char *get_report_title(const char *report_name)
 		  calendar_text());
   }
   return astr_str(&str);
+}
+
+/**********************************************************************//**
+  Returns custom part of the action selection dialog button text for the
+  specified action (given that the action is possible).
+**************************************************************************/
+const char *get_act_sel_action_custom_text(struct action *paction,
+                                           const struct act_prob prob,
+                                           const struct unit *actor_unit,
+                                           const struct city *target_city)
+{
+  static struct astring custom = ASTRING_INIT;
+
+  struct city *actor_homecity = unit_home(actor_unit);
+
+  if (!action_prob_possible(prob)) {
+    /* No info since impossible. */
+    return NULL;
+  }
+
+  fc_assert_ret_val((action_get_target_kind(paction) != ATK_CITY
+                     || target_city != NULL),
+                    NULL);
+
+  if (action_has_result(paction, ACTRES_TRADE_ROUTE)) {
+    int revenue = get_caravan_enter_city_trade_bonus(actor_homecity,
+                                                     target_city,
+                                                     actor_unit->carrying,
+                                                     TRUE);
+
+    astr_set(&custom,
+             /* TRANS: Estimated one time bonus and recurring revenue for
+              * the Establish Trade _Route action. */
+             _("%d one time bonus + %d trade"),
+             revenue,
+             trade_base_between_cities(actor_homecity, target_city));
+  } else if (action_has_result(paction, ACTRES_MARKETPLACE)) {
+    int revenue = get_caravan_enter_city_trade_bonus(actor_homecity,
+                                                     target_city,
+                                                     actor_unit->carrying,
+                                                     FALSE);
+
+    astr_set(&custom,
+             /* TRANS: Estimated one time bonus for the Enter Marketplace
+              * action. */
+             _("%d one time bonus"), revenue);
+  } else if ((action_has_result(paction, ACTRES_HELP_WONDER)
+              || action_has_result(paction, ACTRES_RECYCLE_UNIT))
+             && city_owner(target_city) == client.conn.playing) {
+    /* Can only give remaining production for domestic and existing
+     * cities. */
+    int cost = city_production_build_shield_cost(target_city);
+    astr_set(&custom, _("%d remaining"), cost - target_city->shield_stock);
+  } else {
+    /* No info to add. */
+    return NULL;
+  }
+
+  return astr_str(&custom);
+}
+
+/**********************************************************************//**
+  Get information about starting the action in the current situation.
+  Suitable for a tool tip for the button that starts it.
+  @return an explanation of a tool tip button suitable for a tool tip
+**************************************************************************/
+const char *act_sel_action_tool_tip(const struct action *paction,
+                                    const struct act_prob prob)
+{
+  return action_prob_explain(prob);
 }
 
 /************************************************************************//**

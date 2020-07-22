@@ -481,7 +481,7 @@ cid cid_encode(struct universal target)
 /**********************************************************************//**
   Encode a CID for the target unit type.
 **************************************************************************/
-cid cid_encode_unit(struct unit_type *punittype)
+cid cid_encode_unit(const struct unit_type *punittype)
 {
   struct universal target = {
     .kind = VUT_UTYPE,
@@ -493,7 +493,7 @@ cid cid_encode_unit(struct unit_type *punittype)
 /**********************************************************************//**
   Encode a CID for the target building.
 **************************************************************************/
-cid cid_encode_building(struct impr_type *pimprove)
+cid cid_encode_building(const struct impr_type *pimprove)
 {
   struct universal target = {
     .kind = VUT_IMPROVEMENT,
@@ -537,7 +537,7 @@ bool city_unit_supported(const struct city *pcity,
                          const struct universal *target)
 {
   if (VUT_UTYPE == target->kind) {
-    struct unit_type *tvtype = target->value.utype;
+    const struct unit_type *tvtype = target->value.utype;
 
     unit_list_iterate(pcity->units_supported, punit) {
       if (unit_type_get(punit) == tvtype) {
@@ -556,7 +556,7 @@ bool city_unit_present(const struct city *pcity,
                        const struct universal *target)
 {
   if (VUT_UTYPE == target->kind) {
-    struct unit_type *tvtype = target->value.utype;
+    const struct unit_type *tvtype = target->value.utype;
 
     unit_list_iterate(pcity->tile->units, punit) {
       if (unit_type_get(punit) == tvtype) {
@@ -603,7 +603,7 @@ static int target_get_section(struct universal target)
 }
 
 /**********************************************************************//**
-  Helper for name_and_sort_items.
+  Helper for name_and_sort_items().
 **************************************************************************/
 static int fc_cmp(const void *p1, const void *p2)
 {
@@ -650,7 +650,11 @@ void name_and_sort_items(struct universal *targets, int num_targets,
       if (improvement_has_flag(target.value.building, IF_GOLD)) {
         cost = -1;
       } else {
-        cost = impr_build_shield_cost(pcity, target.value.building);
+        if (pcity != NULL) {
+          cost = impr_build_shield_cost(pcity, target.value.building);
+        } else {
+          cost = MAX(target.value.building->build_cost * game.info.shieldbox / 100, 1);
+        }
       }
     }
 
@@ -940,7 +944,7 @@ int num_present_units_in_city(struct city *pcity)
   Handles a chat or event message.
 **************************************************************************/
 void handle_event(const char *featured_text, struct tile *ptile,
-                  enum event_type event, int turn, int phase, int conn_id)
+		  enum event_type event, int turn, int phase, int conn_id)
 {
   char plain_text[MAX_LEN_MSG];
   struct text_tag_list *tags;
@@ -952,13 +956,13 @@ void handle_event(const char *featured_text, struct tile *ptile,
   if (!event_type_is_valid(event))  {
     /* Server may have added a new event; leave as MW_OUTPUT */
     log_verbose("Unknown event type %d!", event);
-  } else if (event >= 0)  {
+  } else {
     where = messages_where[event];
   }
 
   /* Get the original text. */
   featured_text_to_plain_text(featured_text, plain_text,
-                              sizeof(plain_text), &tags, conn_id != -1);
+			      sizeof(plain_text), &tags, conn_id != -1);
 
   /* Display link marks when an user is pointed us something. */
   if (conn_id != -1) {

@@ -77,6 +77,7 @@
 #include "aiplayer.h"
 #include "aitools.h"
 #include "daicity.h"
+#include "daieffects.h"
 #include "daimilitary.h"
 
 #include "aiunit.h"
@@ -186,7 +187,7 @@ static void dai_airlift(struct ai_type *ait, struct player *pplayer)
       if (pcity) {
         struct ai_city *city_data = def_ai_city_data(pcity, ait);
         struct unit_ai *unit_data = def_ai_unit_data(punit, ait);
-        struct unit_type *ptype = unit_type_get(punit);
+        const struct unit_type *ptype = unit_type_get(punit);
 
         if (city_data->urgency == 0
             && city_data->danger - DEFENSE_POWER(ptype) < comparison
@@ -275,7 +276,7 @@ static int unit_att_rating_squared(const struct unit *punit)
 static int unit_def_rating(const struct unit *attacker,
                            const struct unit *defender)
 {
-  struct unit_type *def_type = unit_type_get(defender);
+  const struct unit_type *def_type = unit_type_get(defender);
   
   return (get_total_defense_power(attacker, defender)
           * (attacker->id != 0 ? defender->hp : def_type->hp)
@@ -300,7 +301,7 @@ static int unit_def_rating_squared(const struct unit *attacker,
 **************************************************************************/
 int unittype_def_rating_squared(const struct unit_type *att_type,
                                 const struct unit_type *def_type,
-                                const struct player *def_player,
+                                struct player *def_player,
                                 struct tile *ptile, bool fortified,
                                 int veteran)
 {
@@ -734,8 +735,8 @@ int look_for_charge(struct ai_type *ait, struct player *pplayer,
 
     /* Consider unit bodyguard. */
     unit_list_iterate(ptile->units, buddy) {
-      struct unit_type *ptype = unit_type_get(punit);
-      struct unit_type *buddy_type = unit_type_get(buddy);
+      const struct unit_type *ptype = unit_type_get(punit);
+      const struct unit_type *buddy_type = unit_type_get(buddy);
 
       /* TODO: allied unit bodyguard? */
       if (!dai_can_unit_type_follow_unit_type(ptype, buddy_type, ait)
@@ -743,7 +744,7 @@ int look_for_charge(struct ai_type *ait, struct player *pplayer,
           || !aiguard_wanted(ait, buddy)
           || unit_move_rate(buddy) > unit_move_rate(punit)
           || DEFENSE_POWER(buddy_type) >= DEFENSE_POWER(ptype)
-          || (is_military_unit(buddy)
+          || (utype_can_do_action_result(buddy_type, ACTRES_ATTACK)
               && 0 == get_transporter_capacity(buddy)
               && ATTACK_POWER(buddy_type) <= ATTACK_POWER(ptype))) {
 
@@ -818,8 +819,8 @@ int look_for_charge(struct ai_type *ait, struct player *pplayer,
 /**********************************************************************//**
   See if the follower can follow the followee
 **************************************************************************/
-bool dai_can_unit_type_follow_unit_type(struct unit_type *follower,
-                                        struct unit_type *followee,
+bool dai_can_unit_type_follow_unit_type(const struct unit_type *follower,
+                                        const struct unit_type *followee,
                                         struct ai_type *ait)
 {
   struct unit_type_ai *utai = utype_ai_data(follower, ait);
@@ -839,7 +840,7 @@ bool dai_can_unit_type_follow_unit_type(struct unit_type *follower,
 static void dai_military_findjob(struct ai_type *ait,
                                  struct player *pplayer, struct unit *punit)
 {
-  struct unit_type *punittype = unit_type_get(punit);
+  const struct unit_type *punittype = unit_type_get(punit);
   struct unit_ai *unit_data;
 
   CHECK_UNIT(punit);
@@ -1097,17 +1098,17 @@ int find_something_to_kill(struct ai_type *ait, struct player *pplayer,
                            struct tile **pdest_tile, struct pf_path **ppath,
                            struct pf_map **pferrymap,
                            struct unit **pferryboat,
-                           struct unit_type **pboattype, int *pmove_time)
+                           const struct unit_type **pboattype, int *pmove_time)
 {
   const int attack_value = adv_unit_att_rating(punit);    /* basic attack. */
   struct pf_parameter parameter;
   struct pf_map *punit_map, *ferry_map;
   struct pf_position pos;
   struct unit_class *punit_class = unit_class_get(punit);
-  struct unit_type *punit_type = unit_type_get(punit);
+  const struct unit_type *punit_type = unit_type_get(punit);
   struct tile *punit_tile = unit_tile(punit);
   /* Type of our boat (a future one if ferryboat == NULL). */
-  struct unit_type *boattype = NULL;
+  const struct unit_type *boattype = NULL;
   struct unit *ferryboat = NULL;
   struct city *pcity;
   struct ai_city *acity_data;
@@ -1133,6 +1134,7 @@ int find_something_to_kill(struct ai_type *ait, struct player *pplayer,
   int want;             /* Want (amortized) of the operaton. */
   int best = 0;         /* Best of all wants. */
   struct tile *goto_dest_tile = NULL;
+  bool can_occupy;
 
   /* Very preliminary checks. */
   *pdest_tile = punit_tile;
@@ -1187,7 +1189,7 @@ int find_something_to_kill(struct ai_type *ait, struct player *pplayer,
   /* Second, calculate in units on their way there, and mark targets for
    * invasion */
   unit_list_iterate(pplayer->units, aunit) {
-    struct unit_type *atype;
+    const struct unit_type *atype;
 
     if (aunit == punit) {
       continue;
@@ -1287,6 +1289,8 @@ int find_something_to_kill(struct ai_type *ait, struct player *pplayer,
     }
   }
 
+  can_occupy = unit_can_take_over(punit);
+
   players_iterate(aplayer) {
     /* For the virtual unit case, which is when we are called to evaluate
      * which units to build, we want to calculate in danger and which
@@ -1355,10 +1359,9 @@ int find_something_to_kill(struct ai_type *ait, struct player *pplayer,
         struct unit_type *def_type = dai_choose_defender_versus(acity, punit);
 
         if (def_type) {
-          int v = unittype_def_rating_squared(punit_type, def_type, aplayer,
-                                              atile, FALSE,
-                                              do_make_unit_veteran(acity,
-                                                                   def_type));
+          int v = unittype_def_rating_squared(
+            punit_type, def_type, aplayer, atile, FALSE,
+            city_production_unit_veteran_level(acity, def_type));
           if (v > vulnerability) {
             /* They can build a better defender! */
             vulnerability = v;
@@ -1377,7 +1380,7 @@ int find_something_to_kill(struct ai_type *ait, struct player *pplayer,
         reserves++;
       }
 
-      if (0 < reserves && (unit_can_take_over(punit)
+      if (0 < reserves && (can_occupy
                            || 0 < acity_data->invasion.occupy)) {
         /* There are units able to occupy the city after all defenders
          * are killed! */
@@ -1391,23 +1394,23 @@ int find_something_to_kill(struct ai_type *ait, struct player *pplayer,
       /* AI was not sending enough reinforcements to totally wipe out a city
        * and conquer it in one turn.
        * This variable enables total carnage. -- Syela */
-      victim_count = unit_list_size(atile->units) + 1;
+      victim_count = unit_list_size(atile->units);
 
-      if (!unit_can_take_over(punit) && NULL == pdefender) {
+      if (!can_occupy && NULL == pdefender) {
         /* Nothing there to bash and we can't occupy!
          * Not having this check caused warships yoyoing */
         want = 0;
       } else if (10 < move_time) {
         /* Too far! */
         want = 0;
-      } else if (unit_can_take_over(punit)
-                 && 0 < acity_data->invasion.attack
-                 && 0 == acity_data->invasion.occupy) {
+      } else if (can_occupy && 0 == acity_data->invasion.occupy
+                 && (0 < acity_data->invasion.attack
+                     || victim_count == 0)) {
         /* Units able to occupy really needed there! */
         want = bcost * SHIELD_WEIGHTING;
       } else {
         want = kill_desire(benefit, attack, bcost + acity_data->bcost,
-                           vulnerability, victim_count);
+                           vulnerability, victim_count + 1);
       }
       want -= move_time * (unhap ? SHIELD_WEIGHTING + 2 * TRADE_WEIGHTING 
                            : SHIELD_WEIGHTING);
@@ -1497,9 +1500,7 @@ int find_something_to_kill(struct ai_type *ait, struct player *pplayer,
         continue;
       }
 
-      if ((unit_has_type_flag(aunit, UTYF_CIVILIAN)
-           || (utype_may_act_at_all(unit_type_get(aunit))
-               && !utype_acts_hostile(unit_type_get(aunit))))
+      if (!utype_acts_hostile(unit_type_get(aunit))
           && 0 == punit->id) {
         /* We will not build units just to chase caravans and
          * ambassadors. */
@@ -2314,7 +2315,7 @@ static void dai_manage_hitpoint_recovery(struct ai_type *ait,
   struct player *pplayer = unit_owner(punit);
   struct city *pcity = tile_city(unit_tile(punit));
   struct city *safe = NULL;
-  struct unit_type *punittype = unit_type_get(punit);
+  const struct unit_type *punittype = unit_type_get(punit);
 
   CHECK_UNIT(punit);
 
@@ -2506,7 +2507,7 @@ static void dai_manage_settler(struct ai_type *ait, struct player *pplayer,
 {
   struct unit_ai *unit_data = def_ai_unit_data(punit, ait);
 
-  punit->ai_controlled = TRUE;
+  unit_server_side_agent_set(pplayer, punit, SSA_AUTOSETTLER);
   unit_data->done = TRUE; /* we will manage this unit later... ugh */
   /* if BUILD_CITY must remain BUILD_CITY, otherwise turn into autosettler */
   if (unit_data->task == AIUNIT_NONE) {
@@ -2691,7 +2692,7 @@ static void dai_set_defenders(struct ai_type *ait, struct player *pplayer)
           break;
         }
       } else {
-        struct unit_type *btype = unit_type_get(best);
+        const struct unit_type *btype = unit_type_get(best);
 
         if ((martless_unhappy < mart_each * count
              || count >= mart_max || mart_each <= 0)
@@ -2754,6 +2755,38 @@ void dai_manage_units(struct ai_type *ait, struct player *pplayer)
       dai_manage_unit(ait, pplayer, punit);
     }
   } unit_list_iterate_safe_end;
+}
+
+/**********************************************************************//**
+  Returns an improvement that will make it possible to build units of the
+  specified type the specified city. Returns FALSE if no new improvement
+  will make it possible or if no improvement is needed.
+**************************************************************************/
+const struct impr_type *utype_needs_improvement(const struct unit_type *putype,
+                                                const struct city *pcity)
+{
+  const struct impr_type *impr_req = NULL;
+
+  requirement_vector_iterate(&putype->build_reqs, preq) {
+    if (is_req_active(city_owner(pcity), NULL,
+                      pcity, NULL, city_tile(pcity), NULL,
+                      putype, NULL, NULL, NULL,
+                      preq, RPT_CERTAIN)) {
+      /* Already there. */
+      continue;
+    }
+    if (!dai_can_requirement_be_met_in_city(preq,
+                                            city_owner(pcity), pcity)) {
+      /* The unit type can't be built at all. */
+      return FALSE;
+    }
+    if (VUT_IMPROVEMENT == preq->source.kind && preq->present) {
+      /* This is (one of) the building(s) required. */
+      impr_req = preq->source.value.building;
+    }
+  } requirement_vector_iterate_end;
+
+  return impr_req;
 }
 
 /**********************************************************************//**

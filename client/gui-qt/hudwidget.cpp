@@ -136,10 +136,12 @@ void hud_message_box::set_text_title(QString s1, QString s2)
     cs1 = s1.left(i);
     cs2 = s1.right(s1.count() - i);
     mult = 2;
-    w2 = qMax(fm_text->width(cs1), fm_text->width(cs2));
-    w = qMax(w2, fm_title->width(s2));
+    w2 = qMax(fm_text->horizontalAdvance(cs1),
+              fm_text->horizontalAdvance(cs2));
+    w = qMax(w2, fm_title->horizontalAdvance(s2));
   } else {
-    w = qMax(fm_text->width(s1), fm_title->width(s2));
+    w = qMax(fm_text->horizontalAdvance(s1),
+             fm_title->horizontalAdvance(s2));
   }
   w = w + 20;
   h = mult * (fm_text->height() * 3 / 2) + 2 * fm_title->height();
@@ -212,16 +214,16 @@ void hud_message_box::paintEvent(QPaintEvent *event)
   p.fillRect(ry, QColor(palette().color(QPalette::AlternateBase)));
   p.fillRect(rfull, g);
   p.setFont(f_title);
-  p.drawText((width() - fm_title->width(title)) / 2,
+  p.drawText((width() - fm_title->horizontalAdvance(title)) / 2,
              fm_title->height() * 4 / 3, title);
   p.setFont(f_text);
   if (mult == 1) {
-    p.drawText((width() - fm_text->width(text)) / 2,
+    p.drawText((width() - fm_text->horizontalAdvance(text)) / 2,
               2 * fm_title->height() + fm_text->height() * 4 / 3, text);
   } else {
-    p.drawText((width() - fm_text->width(cs1)) / 2,
+    p.drawText((width() - fm_text->horizontalAdvance(cs1)) / 2,
               2 * fm_title->height() + fm_text->height() * 4 / 3, cs1);
-    p.drawText((width() - fm_text->width(cs2)) / 2,
+    p.drawText((width() - fm_text->horizontalAdvance(cs2)) / 2,
               2 * fm_title->height() + fm_text->height() * 8 / 3, cs2);
   }
   p.end();
@@ -278,7 +280,7 @@ void hud_text::center_me()
   QPoint p;
 
   w = width();
-  if (bound_rect.isEmpty() == false) {
+  if (!bound_rect.isEmpty()) {
     setFixedSize(bound_rect.width(), bound_rect.height());
   }
   p = QPoint((parentWidget()->width() - w) / 2,
@@ -405,10 +407,12 @@ void hud_input_box::set_text_title_definput(QString s1, QString s2,
     cs1 = s1.left(i);
     cs2 = s1.right(s1.count() - i);
     mult = 2;
-    w2 = qMax(fm_text->width(cs1), fm_text->width(cs2));
-    w = qMax(w2, fm_title->width(s2));
+    w2 = qMax(fm_text->horizontalAdvance(cs1),
+              fm_text->horizontalAdvance(cs2));
+    w = qMax(w2, fm_title->horizontalAdvance(s2));
   } else {
-    w = qMax(fm_text->width(s1), fm_title->width(s2));
+    w = qMax(fm_text->horizontalAdvance(s1),
+             fm_title->horizontalAdvance(s2));
   }
   w = w + 20;
   h = mult * (fm_text->height() * 3 / 2) + 2 * fm_title->height();
@@ -493,16 +497,16 @@ void hud_input_box::paintEvent(QPaintEvent *event)
   p.fillRect(ry, QColor(palette().color(QPalette::AlternateBase)));
   p.fillRect(rx, g);
   p.setFont(f_title);
-  p.drawText((width() - fm_title->width(title)) / 2,
+  p.drawText((width() - fm_title->horizontalAdvance(title)) / 2,
              fm_title->height() * 4 / 3, title);
   p.setFont(f_text);
   if (mult == 1) {
-    p.drawText((width() - fm_text->width(text)) / 2,
+    p.drawText((width() - fm_text->horizontalAdvance(text)) / 2,
               2 * fm_title->height() + fm_text->height() * 4 / 3, text);
   } else {
-    p.drawText((width() - fm_text->width(cs1)) / 2,
+    p.drawText((width() - fm_text->horizontalAdvance(cs1)) / 2,
               2 * fm_title->height() + fm_text->height() * 4 / 3, cs1);
-    p.drawText((width() - fm_text->width(cs2)) / 2,
+    p.drawText((width() - fm_text->horizontalAdvance(cs2)) / 2,
               2 * fm_title->height() + fm_text->height() * 8 / 3, cs2);
   }
   p.end();
@@ -644,15 +648,20 @@ void hud_units::update_actions(unit_list *punits)
                                       " (Selected %1 units)", n))
                .arg(n);
   } else if (num > 1) {
+    QByteArray ut_bytes;
+
+    ut_bytes = snum.toLocal8Bit();
+    /* TRANS: preserve leading space */
     text_str = text_str + QString(PL_(" +%1 unit",
                                       " +%1 units", num-1))
-                                  .arg(snum.toLocal8Bit().data());
+                                  .arg(ut_bytes.data());
   }
+  text_label.setTextFormat(Qt::PlainText);
   text_label.setText(text_str);
   font.setPixelSize((text_label.height() * 9) / 10);
   text_label.setFont(font);
   fm = new QFontMetrics(font);
-  text_label.setFixedWidth(fm->width(text_str) + 20);
+  text_label.setFixedWidth(fm->horizontalAdvance(text_str) + 20);
   delete fm;
 
   unit_pixmap = qtg_canvas_create(tileset_unit_width(tileset),
@@ -714,11 +723,12 @@ void hud_units::update_actions(unit_list *punits)
                                  move_pt_text);
   font.setPointSize(pix.height() / 5);
   fm = new QFontMetrics(font);
-  font_width = (fm->width(move_pt_text) * 3) / 5;
+  font_width = (fm->horizontalAdvance(move_pt_text) * 3) / 5;
   delete fm;
   p.setFont(font);
-  if (fraction1.isNull() == false) {
+  if (!fraction1.isNull()) {
     int t = 2 * font.pointSize();
+
     crop = QRect(bounding_rect.right() - font_width,
                  bounding_rect.top(), t, (t / 5) * 4);
     p.drawText(crop, Qt::AlignLeft | Qt::AlignBottom, fraction1);
@@ -832,10 +842,10 @@ void hud_action::paintEvent(QPaintEvent *event)
   p.drawPixmap(rx, *action_pixmap, ry);
   p.setPen(QColor(palette().color(QPalette::Text)));
   p.drawRect(rz);
-   if (focus == true) {
-     p.setCompositionMode(QPainter::CompositionMode_DestinationOver);
-     p.fillRect(rx, QColor(palette().color(QPalette::Highlight)));
-   }
+  if (focus) {
+    p.setCompositionMode(QPainter::CompositionMode_DestinationOver);
+    p.fillRect(rx, QColor(palette().color(QPalette::Highlight)));
+  }
   p.end();
 
 }
@@ -983,42 +993,30 @@ int unit_actions::update_actions()
 
 
   if (can_unit_do_activity(current_unit, ACTIVITY_MINE)) {
-    struct terrain *pterrain = tile_terrain(unit_tile(current_unit));
-
     a = new hud_action(this);
     a->action_shortcut = SC_BUILDMINE;
+    a->set_pixmap(fc_icons::instance()->get_pixmap("mine"));
     actions.append(a);
-    if (pterrain->mining_result != T_NONE
-        && pterrain->mining_result != pterrain) {
-      if (!strcmp(terrain_rule_name(pterrain), "Jungle")
-          || !strcmp(terrain_rule_name(pterrain), "Plains")
-          || !strcmp(terrain_rule_name(pterrain), "Grassland")
-          || !strcmp(terrain_rule_name(pterrain), "Swamp")) {
-        a->set_pixmap(fc_icons::instance()->get_pixmap("plantforest"));
-      } else {
-        a->set_pixmap(fc_icons::instance()->get_pixmap("transform"));
-      }
-    } else {
-      a->set_pixmap(fc_icons::instance()->get_pixmap("mine"));
-    }
+  }
+
+  if (can_unit_do_activity(current_unit, ACTIVITY_PLANT)) {
+    a = new hud_action(this);
+    a->action_shortcut = SC_PLANT;
+    a->set_pixmap(fc_icons::instance()->get_pixmap("plantforest"));
+    actions.append(a);
   }
 
   if (can_unit_do_activity(current_unit, ACTIVITY_IRRIGATE)) {
-    struct terrain *pterrain = tile_terrain(unit_tile(current_unit));
-
     a = new hud_action(this);
     a->action_shortcut = SC_BUILDIRRIGATION;
-    if (pterrain->irrigation_result != T_NONE
-        && pterrain->irrigation_result != pterrain) {
-      if ((!strcmp(terrain_rule_name(pterrain), "Forest")
-           || !strcmp(terrain_rule_name(pterrain), "Jungle"))) {
-        a->set_pixmap(fc_icons::instance()->get_pixmap("chopchop"));
-      } else {
-        a->set_pixmap(fc_icons::instance()->get_pixmap("transform"));
-      }
-    } else {
-      a->set_pixmap(fc_icons::instance()->get_pixmap("irrigation"));
-    }
+    a->set_pixmap(fc_icons::instance()->get_pixmap("irrigation"));
+    actions.append(a);
+  }
+
+  if (can_unit_do_activity(current_unit, ACTIVITY_CULTIVATE)) {
+    a = new hud_action(this);
+    a->action_shortcut = SC_CULTIVATE;
+    a->set_pixmap(fc_icons::instance()->get_pixmap("chopchop"));
     actions.append(a);
   }
 
@@ -1037,8 +1035,7 @@ int unit_actions::update_actions()
       if (can_build_road(proad, current_unit, unit_tile(current_unit))) {
         ok = true;
       }
-    }
-    extra_type_by_cause_iterate_end;
+    } extra_type_by_cause_iterate_end;
     if (ok) {
       a = new hud_action(this);
       a->action_shortcut = SC_BUILDROAD;
@@ -1635,7 +1632,7 @@ QString popup_terrain_info(struct tile *ptile)
     }
   } extra_type_by_cause_iterate_end;
 
-  if (has_road == true) {
+  if (has_road) {
     ret = ret + QString(_("Movement cost: %1")).arg(move_text);
   } else {
     ret = ret + QString(_("Movement cost: %1")).arg(movement_cost);
@@ -1654,9 +1651,10 @@ void show_new_turn_info()
   QList<hud_text *> close_list;
   struct research *research;
   int i;
+  char buf[25];
 
-  if (client_has_player() == false
-      || gui()->qt_settings.show_new_turn_text == false) {
+  if (!client_has_player()
+      || !gui()->qt_settings.show_new_turn_text) {
     return;
   }
   close_list = gui()->mapview_wdg->findChildren<hud_text *>();
@@ -1679,9 +1677,14 @@ void show_new_turn_info()
         + QString::number(research->client.researching_cost) + ")";
   }
   s = s + "\n" + science_dialog_text() + "\n";
-  s = s + QString(_("Gold: %1 (+%2)"))
+
+  /* Can't use QString().sprintf() as msys libintl.h defines sprintf() as a macro */
+  fc_snprintf(buf, sizeof(buf), "%+d", player_get_expected_income(client.conn.playing));
+
+  /* TRANS: current gold, then loss/gain per turn */
+  s = s + QString(_("Gold: %1 (%2)"))
       .arg(client.conn.playing->economic.gold)
-      .arg(player_get_expected_income(client.conn.playing));
+      .arg(buf);
   ht = new hud_text(s, 5, gui()->mapview_wdg);
   ht->show_me();
 }
@@ -1734,7 +1737,7 @@ void hud_unit_combat::init_images(bool redraw)
                                       tileset_unit_height(tileset));
   defender_pixmap->map_pixmap.fill(Qt::transparent);
   if (defender != nullptr) {
-    if (redraw == false) {
+    if (!redraw) {
       put_unit(defender, defender_pixmap,  1.0, 0, 0);
     } else {
       put_unittype(type_defender, defender_pixmap, 1.0,  0, 0);
@@ -1758,7 +1761,7 @@ void hud_unit_combat::init_images(bool redraw)
                                       tileset_unit_height(tileset));
   attacker_pixmap->map_pixmap.fill(Qt::transparent);
   if (attacker != nullptr) {
-    if (redraw == false) {
+    if (!redraw) {
       put_unit(attacker, attacker_pixmap, 1,  0, 0);
     } else {
       put_unittype(type_attacker, attacker_pixmap, 1,  0, 0);
@@ -1854,7 +1857,7 @@ void hud_unit_combat::paintEvent(QPaintEvent *event)
   if (fading < 1.0) {
     p.setOpacity(fading);
   }
-  if (focus == true) {
+  if (focus) {
     p.fillRect(left, QColor(palette().color(QPalette::Highlight)));
     p.fillRect(right, QColor(palette().color(QPalette::Highlight)));
     c1.setAlpha(110);
@@ -2080,7 +2083,7 @@ void hud_battle_log::timerEvent(QTimerEvent *event)
 
   if (m_timer.elapsed() > 4000 && m_timer.elapsed() < 5000) {
     foreach (hudc, lhuc) {
-      if (hudc->get_focus() == true) {
+      if (hudc->get_focus()) {
         m_timer.restart();
         foreach (hupdate, lhuc) {
           hupdate->set_fading(1.0);

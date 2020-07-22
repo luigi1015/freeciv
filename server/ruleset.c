@@ -397,7 +397,7 @@ struct requirement_vector *lookup_req_list(struct section_file *file,
       return NULL;
     }
     name = NULL;
-    switch (entry_type(pentry)) {
+    switch (entry_type_get(pentry)) {
     case ENTRY_BOOL:
       {
         bool val;
@@ -422,13 +422,17 @@ struct requirement_vector *lookup_req_list(struct section_file *file,
       (void) entry_str_get(pentry, &name);
       break;
     case ENTRY_FLOAT:
-      fc_assert(entry_type(pentry) != ENTRY_FLOAT);
+      fc_assert(entry_type_get(pentry) != ENTRY_FLOAT);
       ruleset_error(LOG_ERROR,
                     "\"%s\": trying to have an floating point entry as a requirement name in '%s.%s%d'.",
                     filename, sec, sub, j);
       break;
     case ENTRY_FILEREFERENCE:
-      fc_assert(entry_type(pentry) != ENTRY_FILEREFERENCE);
+      fc_assert(entry_type_get(pentry) != ENTRY_FILEREFERENCE);
+      break;
+    case ENTRY_ILLEGAL:
+      fc_assert(entry_type_get(pentry) != ENTRY_ILLEGAL);
+      break;
     }
     if (NULL == name) {
       ruleset_error(LOG_ERROR,
@@ -808,7 +812,7 @@ static bool lookup_building_list(struct section_file *file,
 static bool lookup_unit_type(struct section_file *file,
                              const char *prefix,
                              const char *entry,
-                             struct unit_type **result,
+                             const struct unit_type **result,
                              const char *filename,
                              const char *description)
 {
@@ -1869,17 +1873,35 @@ static bool load_ruleset_units(struct section_file *file,
         ok = FALSE;
         break;
       }
+
+      /* Read the government build requirement from the old ruleset format
+       * and put it in unit_type's build_reqs requirement vector.
+       * The build_reqs requirement vector isn't ready to be exposed in the
+       * ruleset yet.
+       * Barbarians can build certain units as long as anyone in the world
+       * has the required tech. Regular players must have the required tech
+       * them self to build the same unit. One way to solve this is to make
+       * unit building an action enabler controlled action with a city (not
+       * unit) actor.
+       * Putting a requirement vector on unit types in the ruleset will
+       * force ruleset authors to change all their unit type build
+       * requirements to a requirement vector. Forcing them to convert their
+       * unit type requirements again in the next version (should building be
+       * switched to an action enabler with a city actor) is not good. */
       if (NULL != section_entry_by_name(psection, "gov_req")) {
         char tmp[200] = "\0";
+        struct government *need_government;
         fc_strlcat(tmp, section_name(psection), sizeof(tmp));
         fc_strlcat(tmp, ".gov_req", sizeof(tmp));
-        u->need_government = lookup_government(file, tmp, filename, NULL);
-        if (u->need_government == NULL) {
+        need_government = lookup_government(file, tmp, filename, NULL);
+        if (need_government == NULL) {
           ok = FALSE;
           break;
         }
-      } else {
-        u->need_government = NULL; /* no requirement */
+        requirement_vector_append(&u->build_reqs, req_from_values(
+                                  VUT_GOVERNMENT, REQ_RANGE_PLAYER,
+                                  FALSE, TRUE, FALSE,
+                                  government_number(need_government)));
       }
 
       if (!load_ruleset_veteran(file, sec_name, &u->veteran,
@@ -1912,12 +1934,24 @@ static bool load_ruleset_units(struct section_file *file,
       struct unit_class *pclass;
       const char *sec_name = section_name(section_list_get(sec, i));
       const char *string;
+      struct impr_type *impr_req = NULL;
 
+      /* Read the building build requirement from the old ruleset format
+       * and put it in unit_type's build_reqs requirement vector.
+       * The build_reqs requirement vector isn't ready to be exposed in the
+       * ruleset yet.
+       * See the comment for gov_req above for why. */
       if (!lookup_building(file, sec_name, "impr_req",
-                           &u->need_improvement, filename,
+                           &impr_req, filename,
                            rule_name_get(&u->name))) {
         ok = FALSE;
         break;
+      }
+      if (impr_req) {
+        requirement_vector_append(&u->build_reqs, req_from_values(
+                                  VUT_IMPROVEMENT, REQ_RANGE_CITY,
+                                  FALSE, TRUE, FALSE,
+                                  improvement_number(impr_req)));
       }
 
       sval = secfile_lookup_str(file, "%s.class", sec_name);
@@ -2009,6 +2043,26 @@ static bool load_ruleset_units(struct section_file *file,
       } output_type_iterate_end;
 
       slist = secfile_lookup_str_vec(file, &nval, "%s.cargo", sec_name);
+      if (u->transport_capacity > 0) {
+        if (nval == 0) {
+          ruleset_error(LOG_ERROR,
+                        "\"%s\" unit type \"%s\" "
+                        "has transport_cap %d, but no cargo unit classes.",
+                        filename, utype_rule_name(u), u->transport_capacity);
+          ok = FALSE;
+          break;
+        }
+      } else {
+        if (nval > 0) {
+          ruleset_error(LOG_ERROR,
+                        "\"%s\" unit type \"%s\" "
+                        "has cargo defined, but transport_cap is 0.",
+                        filename, utype_rule_name(u));
+          ok = FALSE;
+          break;
+        }
+      }
+
       BV_CLR_ALL(u->cargo);
       for (j = 0; j < nval; j++) {
         struct unit_class *uclass = unit_class_by_rule_name(slist[j]);
@@ -2133,10 +2187,17 @@ static bool load_ruleset_units(struct section_file *file,
 
       u->paratroopers_range = secfile_lookup_int_default(file,
           0, "%s.paratroopers_range", sec_name);
-      u->paratroopers_mr_req = SINGLE_MOVE * secfile_lookup_int_default(file,
-          0, "%s.paratroopers_mr_req", sec_name);
-      u->paratroopers_mr_sub = SINGLE_MOVE * secfile_lookup_int_default(file,
-          0, "%s.paratroopers_mr_sub", sec_name);
+      if (compat->compat_mode && compat->ver_units  < 20) {
+        u->rscompat_cache.paratroopers_mr_req
+            = SINGLE_MOVE * secfile_lookup_int_default(
+                  file, 0, "%s.paratroopers_mr_req", sec_name);
+        u->rscompat_cache.paratroopers_mr_sub
+            = SINGLE_MOVE * secfile_lookup_int_default(
+                file, 0, "%s.paratroopers_mr_sub", sec_name);
+      } else {
+        u->rscompat_cache.paratroopers_mr_req = 0;
+        u->rscompat_cache.paratroopers_mr_sub = 0;
+      }
       u->bombard_rate = secfile_lookup_int_default(file, 0,
                                                    "%s.bombard_rate", sec_name);
       u->city_slots = secfile_lookup_int_default(file, 0,
@@ -2802,6 +2863,9 @@ static bool load_ruleset_terrain(struct section_file *file,
                   filename);
     ok = FALSE;
   }
+  terrain_control.infrapoints = FALSE; /* This will be updated if we find
+                                        * an placeable extra. */
+
   terrain_control.pythagorean_diagonal
     = secfile_lookup_bool_default(file, RS_DEFAULT_PYTHAGOREAN_DIAGONAL,
                                   "parameters.pythagorean_diagonal");
@@ -2968,6 +3032,11 @@ static bool load_ruleset_terrain(struct section_file *file,
         ok = FALSE;
         break;
       }
+
+      pterrain->placing_time = 1; /* default */
+      lookup_time(file, &pterrain->placing_time,
+                  tsection, "placing_time", filename, NULL, &ok);
+
       pterrain->pillage_time = 1; /* default */
       lookup_time(file, &pterrain->pillage_time,
                   tsection, "pillage_time", filename, NULL, &ok);
@@ -3215,8 +3284,11 @@ static bool load_ruleset_terrain(struct section_file *file,
                     filename, extra_rule_name(pextra), &ok);
         pextra->removal_time_factor = secfile_lookup_int_default(file, 1,
                                                                  "%s.removal_time_factor", section);
-        pextra->infracost = secfile_lookup_int_default(file, 1,
+        pextra->infracost = secfile_lookup_int_default(file, 0,
                                                        "%s.infracost", section);
+        if (pextra->infracost > 0) {
+          terrain_control.infrapoints = TRUE;
+        }
 
         pextra->defense_bonus  = secfile_lookup_int_default(file, 0,
                                                             "%s.defense_bonus",
@@ -5719,6 +5791,99 @@ static bool load_action_ui_name(struct section_file *file, int act,
 }
 
 /**********************************************************************//**
+  Load max range of an action
+**************************************************************************/
+static bool load_action_range_max(struct section_file *file, action_id act)
+{
+  struct entry *pentry;
+  int max_range;
+
+  pentry = secfile_entry_lookup(file, "actions.%s",
+                                action_max_range_ruleset_var_name(act));
+
+  if (!pentry) {
+    max_range = action_max_range_default(act);
+  } else {
+    const char *custom;
+
+    if (entry_type_get(pentry) == ENTRY_INT
+        && entry_int_get(pentry, &max_range)) {
+      /* max_range already assigned */
+    } else if (entry_type_get(pentry) == ENTRY_STR
+               && entry_str_get(pentry, &custom)
+               && !fc_strcasecmp(custom, RS_ACTION_NO_MAX_DISTANCE)) {
+      max_range = ACTION_DISTANCE_UNLIMITED;
+    } else {
+      ruleset_error(LOG_ERROR, "Bad actions.%s",
+                    action_max_range_ruleset_var_name(act));
+      action_by_number(act)->max_distance = action_max_range_default(act);
+      return FALSE;
+    }
+  }
+
+  action_by_number(act)->max_distance = max_range;
+  return TRUE;
+}
+
+/**********************************************************************//**
+  Load range of an action
+**************************************************************************/
+static bool load_action_range(struct section_file *file, action_id act)
+{
+  if (action_max_range_ruleset_var_name(act) != NULL) {
+    /* Max range can be loaded from the ruleset. */
+    if (!load_action_range_max(file, act)) {
+      return FALSE;
+    }
+  }
+
+  if (action_min_range_ruleset_var_name(act) != NULL) {
+    /* Min range can be loaded from the ruleset. */
+    action_by_number(act)->min_distance
+      = secfile_lookup_int_default(file, action_min_range_default(act),
+                                   "actions.%s",
+                                   action_min_range_ruleset_var_name(act));
+  }
+
+  return TRUE;
+}
+
+/**********************************************************************//**
+  Load kind of an action
+**************************************************************************/
+static bool load_action_kind(struct section_file *file, action_id act)
+{
+  if (action_target_kind_ruleset_var_name(act) != NULL) {
+    /* Target kind can be loaded from the ruleset. */
+    action_by_number(act)->target_kind
+      = secfile_lookup_enum_default(file,
+                                    RS_DEFAULT_USER_ACTION_TARGET_KIND,
+                                    action_target_kind,
+                                    "actions.%s",
+                                    action_target_kind_ruleset_var_name(act));
+  }
+
+  return TRUE;
+}
+
+/**********************************************************************//**
+  Load if the action always consumes the actor
+**************************************************************************/
+static bool load_action_actor_consuming_always(struct section_file *file,
+                                               action_id act)
+{
+  if (action_actor_consuming_always_ruleset_var_name(act) != NULL) {
+    /* Actor consumption can be loaded from the ruleset. */
+    action_by_number(act)->actor_consuming_always
+      = secfile_lookup_bool_default(
+          file, RS_DEFAULT_ACTION_ACTOR_CONSUMING_ALWAYS, "actions.%s",
+          action_actor_consuming_always_ruleset_var_name(act));
+  }
+
+  return TRUE;
+}
+
+/**********************************************************************//**
   Load ruleset file.
 **************************************************************************/
 static bool load_ruleset_game(struct section_file *file, bool act,
@@ -6130,45 +6295,83 @@ static bool load_ruleset_game(struct section_file *file, bool act,
                                            RS_MAX_INCITE_TOTAL_FCT,
                                            "incite_cost.total_factor");
 
-    /* section: global_unit_options */
-    game.info.slow_invasions
-      = secfile_lookup_bool_default(file, RS_DEFAULT_SLOW_INVASIONS,
-                                    "global_unit_options.slow_invasions");
-
     if (ok) {
       /* Auto attack. */
       struct action_auto_perf *auto_perf;
+
+      /* Action auto performers aren't ready to be exposed in the ruleset
+       * yet. The behavior when two action auto performers for the same
+       * cause can fire isn't set in stone yet. How is one of them chosen?
+       * What if all the actions of the chosen action auto performer turned
+       * out to be illegal but one of the other action auto performers that
+       * fired has legal actions? These issues can decide what other action
+       * rules action auto performers can represent in the future. Deciding
+       * should therefore wait until a rule needs action auto performers to
+       * work a certain way. */
+      /* Only one action auto performer, ACTION_AUTO_MOVED_ADJ, is caused
+       * by AAPC_UNIT_MOVED_ADJ. It is therefore safe to expose the full
+       * requirement vector to the ruleset. */
+      struct requirement_vector *reqs;
 
       /* A unit moved next to this unit and the autoattack server setting
        * is enabled. */
       auto_perf = action_auto_perf_slot_number(ACTION_AUTO_MOVED_ADJ);
       auto_perf->cause = AAPC_UNIT_MOVED_ADJ;
 
-      /* Auto attack happens during war. */
-      requirement_vector_append(&auto_perf->reqs,
-                                req_from_values(VUT_DIPLREL,
-                                                REQ_RANGE_LOCAL,
-                                                FALSE, TRUE, TRUE, DS_WAR));
-
-      /* Needs a movement point to auto attack. */
-      requirement_vector_append(&auto_perf->reqs,
-                                req_from_values(VUT_MINMOVES,
-                                                REQ_RANGE_LOCAL,
-                                                FALSE, TRUE, TRUE, 1));
-
-      /* Internally represented as an action auto performer rule. */
-      if (!load_action_auto_uflag_block(file, auto_perf,
-                                         "auto_attack.will_never",
-                                         filename)) {
+      reqs = lookup_req_list(file, compat,
+                             "auto_attack", "if_attacker",
+                             "auto_attack");
+      if (reqs == NULL) {
         ok = FALSE;
       }
 
-      /* TODO: It would be great if unit_survive_autoattack() could be made
-       * flexible enough to also handle diplomatic actions etc. */
-      auto_perf->alternatives[0] = ACTION_CAPTURE_UNITS;
-      auto_perf->alternatives[1] = ACTION_BOMBARD;
-      auto_perf->alternatives[2] = ACTION_ATTACK;
-      auto_perf->alternatives[3] = ACTION_SUICIDE_ATTACK;
+      requirement_vector_copy(&auto_perf->reqs, reqs);
+
+      if (!load_action_auto_actions(file, auto_perf,
+                                    "auto_attack.attack_actions",
+                                    filename)) {
+        /* Failed to load auto attack actions */
+        ruleset_error(LOG_ERROR,
+                      "\"%s\": %s: failed load %s.",
+                      filename, "auto_attack", "attack_actions");
+        ok = FALSE;
+      }
+
+      if (compat->compat_mode) {
+        enum unit_type_flag_id *protecor_flag;
+        size_t psize;
+
+        if (secfile_entry_lookup(file, "%s", "auto_attack.will_never")) {
+          protecor_flag =
+              secfile_lookup_enum_vec(file, &psize, unit_type_flag_id,
+                                      "%s", "auto_attack.will_never");
+
+          if (!protecor_flag) {
+            /* Entity exists but couldn't read it. */
+            ruleset_error(LOG_ERROR,
+                          "\"%s\": %s: bad unit type flag list.",
+                          filename, "auto_attack.will_never");
+
+            ok = FALSE;
+          }
+        } else {
+          psize = 0;
+          protecor_flag = NULL;
+        }
+
+        if (!rscompat_auto_attack_3_1(compat, auto_perf,
+                                      psize, protecor_flag)) {
+          /* Upgrade failed */
+          ruleset_error(LOG_ERROR,
+                        "\"%s\": %s: failed to upgrade.",
+                        filename, "auto_attack");
+          ok = FALSE;
+        }
+
+        if (psize) {
+          FC_FREE(protecor_flag);
+        }
+      }
     }
 
     /* section: actions */
@@ -6192,13 +6395,23 @@ static bool load_ruleset_game(struct section_file *file, bool act,
       if (force_capture_units) {
         BV_SET(action_by_number(ACTION_BOMBARD)->blocked_by,
                ACTION_CAPTURE_UNITS);
+        BV_SET(action_by_number(ACTION_BOMBARD2)->blocked_by,
+               ACTION_CAPTURE_UNITS);
+        BV_SET(action_by_number(ACTION_BOMBARD3)->blocked_by,
+               ACTION_CAPTURE_UNITS);
         BV_SET(action_by_number(ACTION_NUKE)->blocked_by,
+               ACTION_CAPTURE_UNITS);
+        BV_SET(action_by_number(ACTION_NUKE_CITY)->blocked_by,
+               ACTION_CAPTURE_UNITS);
+        BV_SET(action_by_number(ACTION_NUKE_UNITS)->blocked_by,
                ACTION_CAPTURE_UNITS);
         BV_SET(action_by_number(ACTION_SUICIDE_ATTACK)->blocked_by,
                ACTION_CAPTURE_UNITS);
         BV_SET(action_by_number(ACTION_ATTACK)->blocked_by,
                ACTION_CAPTURE_UNITS);
         BV_SET(action_by_number(ACTION_CONQUER_CITY)->blocked_by,
+               ACTION_CAPTURE_UNITS);
+        BV_SET(action_by_number(ACTION_CONQUER_CITY2)->blocked_by,
                ACTION_CAPTURE_UNITS);
       }
 
@@ -6211,12 +6424,46 @@ static bool load_ruleset_game(struct section_file *file, bool act,
       if (force_bombard) {
         BV_SET(action_by_number(ACTION_NUKE)->blocked_by,
                ACTION_BOMBARD);
+        BV_SET(action_by_number(ACTION_NUKE_CITY)->blocked_by,
+               ACTION_BOMBARD);
+        BV_SET(action_by_number(ACTION_NUKE_UNITS)->blocked_by,
+               ACTION_BOMBARD);
         BV_SET(action_by_number(ACTION_SUICIDE_ATTACK)->blocked_by,
                ACTION_BOMBARD);
         BV_SET(action_by_number(ACTION_ATTACK)->blocked_by,
                ACTION_BOMBARD);
         BV_SET(action_by_number(ACTION_CONQUER_CITY)->blocked_by,
                ACTION_BOMBARD);
+        BV_SET(action_by_number(ACTION_CONQUER_CITY2)->blocked_by,
+               ACTION_BOMBARD);
+        BV_SET(action_by_number(ACTION_NUKE)->blocked_by,
+               ACTION_BOMBARD2);
+        BV_SET(action_by_number(ACTION_NUKE_CITY)->blocked_by,
+               ACTION_BOMBARD2);
+        BV_SET(action_by_number(ACTION_NUKE_UNITS)->blocked_by,
+               ACTION_BOMBARD2);
+        BV_SET(action_by_number(ACTION_SUICIDE_ATTACK)->blocked_by,
+               ACTION_BOMBARD2);
+        BV_SET(action_by_number(ACTION_ATTACK)->blocked_by,
+               ACTION_BOMBARD2);
+        BV_SET(action_by_number(ACTION_CONQUER_CITY)->blocked_by,
+               ACTION_BOMBARD2);
+        BV_SET(action_by_number(ACTION_CONQUER_CITY2)->blocked_by,
+               ACTION_BOMBARD2);
+        BV_SET(action_by_number(ACTION_NUKE)->blocked_by,
+               ACTION_BOMBARD3);
+        BV_SET(action_by_number(ACTION_NUKE_CITY)->blocked_by,
+               ACTION_BOMBARD3);
+        BV_SET(action_by_number(ACTION_NUKE_UNITS)->blocked_by,
+               ACTION_BOMBARD3);
+        BV_SET(action_by_number(ACTION_SUICIDE_ATTACK)->blocked_by,
+               ACTION_BOMBARD3);
+        BV_SET(action_by_number(ACTION_ATTACK)->blocked_by,
+               ACTION_BOMBARD3);
+        BV_SET(action_by_number(ACTION_CONQUER_CITY)->blocked_by,
+               ACTION_BOMBARD3);
+        BV_SET(action_by_number(ACTION_CONQUER_CITY2)->blocked_by,
+               ACTION_BOMBARD3);
       }
 
       /* Forbid attacking when it is legal to do explode nuclear. */
@@ -6232,6 +6479,24 @@ static bool load_ruleset_game(struct section_file *file, bool act,
                ACTION_NUKE);
         BV_SET(action_by_number(ACTION_CONQUER_CITY)->blocked_by,
                ACTION_NUKE);
+        BV_SET(action_by_number(ACTION_CONQUER_CITY2)->blocked_by,
+               ACTION_NUKE);
+        BV_SET(action_by_number(ACTION_SUICIDE_ATTACK)->blocked_by,
+               ACTION_NUKE_CITY);
+        BV_SET(action_by_number(ACTION_ATTACK)->blocked_by,
+               ACTION_NUKE_CITY);
+        BV_SET(action_by_number(ACTION_CONQUER_CITY)->blocked_by,
+               ACTION_NUKE_CITY);
+        BV_SET(action_by_number(ACTION_CONQUER_CITY2)->blocked_by,
+               ACTION_NUKE_CITY);
+        BV_SET(action_by_number(ACTION_SUICIDE_ATTACK)->blocked_by,
+               ACTION_NUKE_UNITS);
+        BV_SET(action_by_number(ACTION_ATTACK)->blocked_by,
+               ACTION_NUKE_UNITS);
+        BV_SET(action_by_number(ACTION_CONQUER_CITY)->blocked_by,
+               ACTION_NUKE_UNITS);
+        BV_SET(action_by_number(ACTION_CONQUER_CITY2)->blocked_by,
+               ACTION_NUKE_UNITS);
       }
 
       /* If the "Poison City" action or the "Poison City Escape" action
@@ -6243,46 +6508,25 @@ static bool load_ruleset_game(struct section_file *file, bool act,
                                       RS_DEFAULT_POISON_EMPTIES_FOOD_STOCK,
                                       "actions.poison_empties_food_stock");
 
-      /* Allow setting max distance for bombardment before generalized
+      /* If the "Steal Maps" action or the "Steal Maps Escape" action always
+       * will reveal all cities when successful. */
+      game.info.steal_maps_reveals_all_cities
+        = secfile_lookup_bool_default(file,
+                                      RS_DEFAULT_STEAL_MAP_REVEALS_CITIES,
+                                      "actions.steal_maps_reveals_all_cities");
+
+      /* Allow setting required distance for some actions before generalized
        * actions. */
-      {
-        struct entry *pentry;
-        int max_range;
-
-        pentry = secfile_entry_lookup(file, "actions.bombard_max_range");
-
-        if (!pentry) {
-          max_range = RS_DEFAULT_BOMBARD_MAX_RANGE;
-        } else {
-          switch (entry_type(pentry)) {
-          case ENTRY_INT:
-            if (entry_int_get(pentry, &max_range)) {
-              break;
-            }
-            /* Fall through to error handling. */
-          case ENTRY_STR:
-            {
-              const char *custom;
-
-              if (entry_str_get(pentry, &custom)
-                  && !fc_strcasecmp(custom, RS_ACTION_NO_MAX_DISTANCE)) {
-                max_range = ACTION_DISTANCE_UNLIMITED;
-                break;
-              }
-            }
-            /* Fall through to error handling. */
-          default:
-            ruleset_error(LOG_ERROR, "Bad actions.bombard_max_range");
-            ok = FALSE;
-            max_range = RS_DEFAULT_BOMBARD_MAX_RANGE;
-            break;
-          }
-        }
-
-        action_by_number(ACTION_BOMBARD)->max_distance = max_range;
-      }
-
       action_iterate(act_id) {
+        if (!load_action_range(file, act_id)) {
+          ok = FALSE;
+        }
+        if (!load_action_kind(file, act_id)) {
+          ok = FALSE;
+        }
+        if (!load_action_actor_consuming_always(file, act_id)) {
+          ok = FALSE;
+        }
         load_action_ui_name(file, act_id,
                             action_ui_name_ruleset_var_name(act_id));
       } action_iterate_end;
@@ -6374,6 +6618,16 @@ static bool load_ruleset_game(struct section_file *file, bool act,
     }
   }
 
+  if (compat->compat_mode) {
+    bool slow_invasions
+      = secfile_lookup_bool_default(file, TRUE,
+                                    "global_unit_options.slow_invasions");
+
+    if (!rscompat_old_slow_invasions_3_1(compat, slow_invasions)) {
+      ok = FALSE;
+    }
+  }
+
   if (ok) {
     const char *tus_text;
 
@@ -6386,13 +6640,13 @@ static bool load_ruleset_game(struct section_file *file, bool act,
       = secfile_lookup_bool_default(file, RS_DEFAULT_ONLY_KILLING_VETERAN,
                                     "combat_rules.only_killing_makes_veteran");
 
-    game.server.nuke_pop_loss_pct = secfile_lookup_int_default_min_max(file,
+    game.info.nuke_pop_loss_pct = secfile_lookup_int_default_min_max(file,
                                            RS_DEFAULT_NUKE_POP_LOSS_PCT,
                                            RS_MIN_NUKE_POP_LOSS_PCT,
                                            RS_MAX_NUKE_POP_LOSS_PCT,
                                            "combat_rules.nuke_pop_loss_pct");
 
-    game.server.nuke_defender_survival_chance_pct = secfile_lookup_int_default_min_max(file,
+    game.info.nuke_defender_survival_chance_pct = secfile_lookup_int_default_min_max(file,
                                         RS_DEFAULT_NUKE_DEFENDER_SURVIVAL_CHANCE_PCT,
                                         RS_MIN_NUKE_DEFENDER_SURVIVAL_CHANCE_PCT,
                                         RS_MAX_NUKE_DEFENDER_SURVIVAL_CHANCE_PCT,
@@ -6833,6 +7087,7 @@ static bool load_ruleset_game(struct section_file *file, bool act,
                                                              "%s.type", sec_name);
         enum clause_type type = clause_type_by_name(clause_name, fc_strcasecmp);
         struct clause_info *info;
+        struct requirement_vector *reqs;
 
         if (!clause_type_is_valid(type)) {
           ruleset_error(LOG_ERROR, "\"%s\" unknown clause type \"%s\".",
@@ -6850,9 +7105,24 @@ static bool load_ruleset_game(struct section_file *file, bool act,
           break;
         }
 
+        reqs = lookup_req_list(file, compat, sec_name, "giver_reqs", clause_name);
+        if (reqs == NULL) {
+          ok = FALSE;
+          break;
+        }
+        requirement_vector_copy(&info->giver_reqs, reqs);
+
+        reqs = lookup_req_list(file, compat, sec_name, "receiver_reqs", clause_name);
+        if (reqs == NULL) {
+          ok = FALSE;
+          break;
+        }
+        requirement_vector_copy(&info->receiver_reqs, reqs);
+
         info->enabled = TRUE;
       }
     }
+    section_list_destroy(sec);
   }
 
   /* secfile_check_unused() is not here, but only after also settings section
@@ -6965,12 +7235,13 @@ static void send_ruleset_units(struct conn_list *dest)
     packet.tech_requirement = u->require_advance
                               ? advance_number(u->require_advance)
                               : advance_count();
-    packet.impr_requirement = u->need_improvement
-                              ? improvement_number(u->need_improvement)
-                              : improvement_count();
-    packet.gov_requirement = u->need_government
-                             ? government_number(u->need_government)
-                             : government_count();
+
+    i = 0;
+    requirement_vector_iterate(&u->build_reqs, req) {
+      packet.build_reqs[i++] = *req;
+    } requirement_vector_iterate_end;
+    packet.build_reqs_count = i;
+
     packet.vision_radius_sq = u->vision_radius_sq;
     packet.transport_capacity = u->transport_capacity;
     packet.hp = u->hp;
@@ -6990,8 +7261,6 @@ static void send_ruleset_units(struct conn_list *dest)
       packet.upkeep[o] = u->upkeep[o];
     } output_type_iterate_end;
     packet.paratroopers_range = u->paratroopers_range;
-    packet.paratroopers_mr_req = u->paratroopers_mr_req;
-    packet.paratroopers_mr_sub = u->paratroopers_mr_sub;
     packet.bombard_rate = u->bombard_rate;
     packet.city_size = u->city_size;
     packet.city_slots = u->city_slots;
@@ -7309,6 +7578,7 @@ static void send_ruleset_terrain(struct conn_list *dest)
     packet.transform_result = (pterrain->transform_result
 			       ? terrain_number(pterrain->transform_result)
 			       : terrain_count());
+    packet.placing_time = pterrain->placing_time;
     packet.pillage_time = pterrain->pillage_time;
     packet.transform_time = pterrain->transform_time;
     packet.clean_pollution_time = pterrain->clean_pollution_time;
@@ -7612,12 +7882,18 @@ static void send_ruleset_actions(struct conn_list *dest)
   struct packet_ruleset_action packet;
 
   action_iterate(act) {
+    struct action *paction = action_by_number(act);
+
     packet.id = act;
     sz_strlcpy(packet.ui_name, action_by_number(act)->ui_name);
     packet.quiet = action_by_number(act)->quiet;
 
+    packet.result = paction->result;
+    packet.actor_consuming_always = paction->actor_consuming_always;
+
     packet.act_kind = action_by_number(act)->actor_kind;
     packet.tgt_kind = action_by_number(act)->target_kind;
+    packet.sub_tgt_kind = action_id_get_sub_target_kind(act);
 
     packet.min_distance = action_by_number(act)->min_distance;
     packet.max_distance = action_by_number(act)->max_distance;
@@ -7891,9 +8167,22 @@ static void send_ruleset_clauses(struct conn_list *dest)
 
   for (i = 0; i < CLAUSE_COUNT; i++) {
     struct clause_info *info = clause_info_get(i);
+    int j;
 
     packet.type = i;
     packet.enabled = info->enabled;
+
+    j = 0;
+    requirement_vector_iterate(&info->giver_reqs, preq) {
+      packet.giver_reqs[j++] = *preq;
+    } requirement_vector_iterate_end;
+    packet.giver_reqs_count = j;
+
+    j = 0;
+    requirement_vector_iterate(&info->receiver_reqs, preq) {
+      packet.receiver_reqs[j++] = *preq;
+    } requirement_vector_iterate_end;
+    packet.receiver_reqs_count = j;
 
     lsend_packet_ruleset_clause(dest, &packet);
   }

@@ -1928,7 +1928,7 @@ static bool objbind_get_allowed_value_span(struct objbind *ob,
       switch (propid) {
       case OPID_UNIT_MOVES_LEFT:
         *pmin = 0;
-        *pmax = 65535; /* packets.def MOVEFRAGS */
+        *pmax = MAX_MOVE_FRAGS;
         *pstep = 1;
         *pbig_step = 5;
         return TRUE;
@@ -4718,7 +4718,7 @@ property_page_new(enum editor_object_type objtype,
   const char *attr_type_str, *name, *tooltip;
   gchar *title;
 
-  if (!(0 <= objtype && objtype < NUM_OBJTYPES)) {
+  if (!(objtype < NUM_OBJTYPES)) {
     return NULL;
   }
 
@@ -4909,7 +4909,7 @@ property_page_new(enum editor_object_type objtype,
   gtk_container_set_border_width(GTK_CONTAINER(hbox2), 4);
   gtk_container_add(GTK_CONTAINER(vbox2), hbox2);
 
-  button = gtk_button_new_with_label(_("Close"));
+  button = gtk_button_new_with_mnemonic(_("_Close"));
   gtk_size_group_add_widget(sizegroup, button);
   g_signal_connect_swapped(button, "clicked",
       G_CALLBACK(gtk_widget_hide_on_delete), pe->widget);
@@ -4980,7 +4980,7 @@ property_page_new(enum editor_object_type objtype,
   gtk_grid_set_column_spacing(GTK_GRID(hbox2), 4);
   gtk_container_add(GTK_CONTAINER(vbox), hbox2);
 
-  button = gtk_button_new_with_label(_("Refresh"));
+  button = gtk_button_new_with_mnemonic(_("_Refresh"));
   gtk_size_group_add_widget(sizegroup, button);
   gtk_widget_set_tooltip_text(button,
       _("Pressing this button will reset all modified properties of "
@@ -4990,7 +4990,7 @@ property_page_new(enum editor_object_type objtype,
                    G_CALLBACK(property_page_refresh_button_clicked), pp);
   gtk_container_add(GTK_CONTAINER(hbox2), button);
 
-  button = gtk_button_new_with_label(_("Apply"));
+  button = gtk_button_new_with_mnemonic(_("_Apply"));
   gtk_size_group_add_widget(sizegroup, button);
   gtk_widget_set_tooltip_text(button,
       _("Pressing this button will send all modified properties of "
@@ -6091,7 +6091,7 @@ static bool property_editor_add_page(struct property_editor *pe,
     return FALSE;
   }
 
-  if (!(0 <= objtype && objtype < NUM_OBJTYPES)) {
+  if (!(objtype < NUM_OBJTYPES)) {
     return FALSE;
   }
 
@@ -6117,7 +6117,7 @@ static struct property_page *
 property_editor_get_page(struct property_editor *pe,
                          enum editor_object_type objtype)
 {
-  if (!pe || !(0 <= objtype && objtype < NUM_OBJTYPES)) {
+  if (!pe || !(objtype < NUM_OBJTYPES)) {
     return NULL;
   }
 
@@ -6227,7 +6227,7 @@ void property_editor_popup(struct property_editor *pe,
   gtk_widget_show_all(pe->widget);
 
   gtk_window_present(GTK_WINDOW(pe->widget));
-  if (0 <= objtype && objtype < NUM_OBJTYPES) {
+  if (objtype < NUM_OBJTYPES) {
     gtk_notebook_set_current_page(GTK_NOTEBOOK(pe->notebook), objtype);
   }
 }
@@ -6258,7 +6258,7 @@ void property_editor_handle_object_changed(struct property_editor *pe,
     return;
   }
 
-  if (!(0 <= objtype && objtype < NUM_OBJTYPES)) {
+  if (!(objtype < NUM_OBJTYPES)) {
     return;
   }
 

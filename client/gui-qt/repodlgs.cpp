@@ -131,6 +131,7 @@ unittype_item::unittype_item(QWidget *parent,
   upgrade_button.setVisible(false);
   connect(&upgrade_button, &QAbstractButton::pressed, this, &unittype_item::upgrade_units);
   hbox_top->addWidget(&upgrade_button, 0, Qt::AlignLeft);
+  label_info_unit.setTextFormat(Qt::PlainText);
   hbox_top->addWidget(&label_info_unit);
   vbox_main->addLayout(hbox_top);
   vbox->addWidget(&label_info_active);
@@ -202,11 +203,11 @@ void unittype_item::upgrade_units()
 {
   char buf[1024];
   char buf2[2048];
-  hud_message_box ask(gui()->central_wdg);
+  hud_message_box *ask = new hud_message_box(gui()->central_wdg);
   int price;
-  int ret;
   QString s2;
-  struct unit_type *upgrade;
+  const struct unit_type *upgrade;
+  const Unit_type_id type = utype_number(utype);
 
   upgrade = can_upgrade_unittype(client_player(), utype);
   price = unit_upgrade_price(client_player(), utype, upgrade);
@@ -222,18 +223,14 @@ void unittype_item::upgrade_units()
               utype_name_translation(utype),
               utype_name_translation(upgrade), price, buf);
   s2 = QString(buf2);
-  ask.set_text_title(s2, _("Upgrade Obsolete Units"));
-  ask.setStandardButtons(QMessageBox::Cancel | QMessageBox::Ok);
-  ask.setDefaultButton(QMessageBox::Cancel);
-  ret = ask.exec();
-
-  switch (ret) {
-  case QMessageBox::Cancel:
-    return;
-  case QMessageBox::Ok:
-    dsend_packet_unit_type_upgrade(&client.conn, utype_number(utype));
-    return;
-  }
+  ask->set_text_title(s2, _("Upgrade Obsolete Units"));
+  ask->setStandardButtons(QMessageBox::Cancel | QMessageBox::Ok);
+  ask->setDefaultButton(QMessageBox::Cancel);
+  ask->setAttribute(Qt::WA_DeleteOnClose);
+  connect(ask, &hud_message_box::accepted, [=]() {
+    dsend_packet_unit_type_upgrade(&client.conn, type);
+  });
+  ask->show();
 }
 
 /************************************************************************//**
@@ -772,7 +769,8 @@ void research_diagram::mouseMoveEvent(QMouseEvent *event)
         tt_text = QString(buffer);
         def_str = "<p style='white-space:pre'><b>"
                   + QString(advance_name_translation(
-                            advance_by_number(rttp->tech_id))) + "</b>\n";
+                            advance_by_number(rttp->tech_id))).toHtmlEscaped()
+                  + "</b>\n";
       } else if (rttp->timpr != nullptr) {
         def_str = get_tooltip_improvement(rttp->timpr, nullptr);
         tt_text = helptext_building(buffer, sizeof(buffer),
@@ -789,16 +787,17 @@ void research_diagram::mouseMoveEvent(QMouseEvent *event)
         tt_text = QString(buffer);
         tt_text = cut_helptext(tt_text);
         def_str = "<p style='white-space:pre'><b>"
-                  + QString(government_name_translation(rttp->tgov)) + "</b>\n";
+            + QString(government_name_translation(rttp->tgov)).toHtmlEscaped()
+            + "</b>\n";
       } else {
         return;
       }
       tt_text = split_text(tt_text, true);
-      tt_text = def_str + tt_text;
+      tt_text = def_str + tt_text.toHtmlEscaped();
       tooltip_text = tt_text.trimmed();
       tooltip_rect = rttp->rect;
       tooltip_pos = event->globalPos();
-      if (QToolTip::isVisible() == false && timer_active == false) {
+      if (!QToolTip::isVisible() && !timer_active) {
         timer_active = true;
         QTimer::singleShot(500, this, SLOT(show_tooltip()));
       }
@@ -1169,7 +1168,7 @@ void real_science_report_dialog_update(void *unused)
    str = " ";
  }
 
-  if (blk == true) {
+  if (blk) {
     gui()->sw_science->keep_blinking = true;
     gui()->sw_science->set_custom_labels(str);
     gui()->sw_science->sblink();
@@ -1389,7 +1388,7 @@ void eco_report::selection_changed(const QItemSelection & sl,
   int i;
   QVariant qvar;
   struct universal selected;
-  struct impr_type *pimprove;
+  const struct impr_type *pimprove;
   disband_button->setEnabled(false);
   sell_button->setEnabled(false);
   sell_redun_button->setEnabled(false);
@@ -1434,36 +1433,34 @@ void eco_report::disband_units()
 {
   struct universal selected;
   char buf[1024];
-  QString s;
-  hud_message_box ask(gui()->central_wdg);
-  int ret;
-  struct unit_type *putype;
+  hud_message_box *ask = new hud_message_box(gui()->central_wdg);
+  Unit_type_id utype;
 
   selected = cid_decode(uid);
-  putype = selected.value.utype;
+  utype = utype_number(selected.value.utype);
   fc_snprintf(buf, ARRAY_SIZE(buf),
-              _("Do you really wish to disband "
-                "every %s (%d total)?"),
-              utype_name_translation(putype), counter);
+              _("Do you really wish to disband every %s (%d total)?"),
+              utype_name_translation(utype_by_number(utype)), counter);
 
-  s = QString(buf);
-  ask.set_text_title(s, _("Disband Units"));
-  ask.setStandardButtons(QMessageBox::Cancel | QMessageBox::Ok);
-  ask.setDefaultButton(QMessageBox::Cancel);
-  ret = ask.exec();
-  switch (ret) {
-  case QMessageBox::Cancel:
-    return;
-  case QMessageBox::Ok:
-    disband_all_units(putype, false, buf, sizeof(buf));
-    break;
-  default:
-    return;
-  }
-  s = QString(buf);
-  ask.set_text_title(s, _("Disband Results"));
-  ask.setStandardButtons(QMessageBox::Ok);
-  ask.exec();
+  ask->set_text_title(buf, _("Disband Units"));
+  ask->setStandardButtons(QMessageBox::Cancel | QMessageBox::Ok);
+  ask->setDefaultButton(QMessageBox::Cancel);
+  ask->setAttribute(Qt::WA_DeleteOnClose);
+  connect(ask, &hud_message_box::accepted, [=]() {
+    struct unit_type *putype = utype_by_number(utype);
+    char buf[1024];
+    hud_message_box *result;
+
+    if (putype) {
+      disband_all_units(putype, false, buf, sizeof(buf));
+    }
+
+    result = new hud_message_box(gui()->central_wdg);
+    result->set_text_title(buf, _("Disband Results"));
+    result->setStandardButtons(QMessageBox::Ok);
+    result->setAttribute(Qt::WA_DeleteOnClose);
+    result->show();
+  });
 }
 
 /************************************************************************//**
@@ -1473,38 +1470,42 @@ void eco_report::sell_buildings()
 {
   struct universal selected;
   char buf[1024];
-  QString s;
-  hud_message_box ask(gui()->central_wdg);
-  int ret;
-  struct impr_type *pimprove;
+  hud_message_box *ask = new hud_message_box(gui()->central_wdg);
+  const struct impr_type *pimprove;
+  Impr_type_id impr_id;
 
   selected = cid_decode(uid);
   pimprove = selected.value.building;
+  impr_id = improvement_number(pimprove);
 
   fc_snprintf(buf, ARRAY_SIZE(buf),
               _("Do you really wish to sell "
                 "every %s (%d total)?"),
               improvement_name_translation(pimprove), counter);
 
-  s = QString(buf);
-  ask.set_text_title(s, _("Sell Improvements"));
-  ask.setStandardButtons(QMessageBox::Cancel | QMessageBox::Ok);
-  ask.setDefaultButton(QMessageBox::Cancel);
-  ret = ask.exec();
-  switch (ret) {
-  case QMessageBox::Cancel:
-    return;
-  case QMessageBox::Ok:
+  ask->set_text_title(buf, _("Sell Improvements"));
+  ask->setStandardButtons(QMessageBox::Cancel | QMessageBox::Ok);
+  ask->setDefaultButton(QMessageBox::Cancel);
+  ask->setAttribute(Qt::WA_DeleteOnClose);
+  connect(ask, &hud_message_box::accepted, [=]() {
+    char buf[1024];
+    hud_message_box *result;
+    struct impr_type *pimprove = improvement_by_number(impr_id);
+
+    if (!pimprove) {
+      return;
+    }
+
     sell_all_improvements(pimprove, false, buf, sizeof(buf));
-    break;
-  default:
-    return;
-  }
-  s = QString(buf);
-  ask.set_text_title(s, _("Sell-Off: Results"));
-  ask.setStandardButtons(QMessageBox::Ok);
-  ask.exec();
+
+    result = new hud_message_box(gui()->central_wdg);
+    result->set_text_title(buf, _("Sell-Off: Results"));
+    result->setStandardButtons(QMessageBox::Ok);
+    result->setAttribute(Qt::WA_DeleteOnClose);
+    result->show();
+  });
 }
+
 
 /************************************************************************//**
   Sells redundant buildings
@@ -1514,36 +1515,40 @@ void eco_report::sell_redundant()
   struct universal selected;
   char buf[1024];
   QString s;
-  hud_message_box ask(gui()->central_wdg);
-  int ret;
-  struct impr_type *pimprove;
+  hud_message_box *ask = new hud_message_box(gui()->central_wdg);
+  const struct impr_type *pimprove;
+  Impr_type_id impr_id;
 
   selected = cid_decode(uid);
   pimprove = selected.value.building;
+  impr_id = improvement_number(pimprove);
 
   fc_snprintf(buf, ARRAY_SIZE(buf),
               _("Do you really wish to sell "
                 "every redundant %s (%d total)?"),
               improvement_name_translation(pimprove), counter);
 
-  s = QString(buf);
-  ask.set_text_title(s, _("Sell Improvements"));
-  ask.setStandardButtons(QMessageBox::Cancel | QMessageBox::Ok);
-  ask.setDefaultButton(QMessageBox::Cancel);
-  ret = ask.exec();
-  switch (ret) {
-  case QMessageBox::Cancel:
-    return;
-  case QMessageBox::Ok:
+  ask->set_text_title(s, _("Sell Improvements"));
+  ask->setStandardButtons(QMessageBox::Cancel | QMessageBox::Ok);
+  ask->setDefaultButton(QMessageBox::Cancel);
+  ask->setAttribute(Qt::WA_DeleteOnClose);
+  connect(ask, &hud_message_box::accepted, [=]() {
+    char buf[1024];
+    hud_message_box *result;
+    struct impr_type *pimprove = improvement_by_number(impr_id);
+
+    if (!pimprove) {
+      return;
+    }
+
     sell_all_improvements(pimprove, true, buf, sizeof(buf));
-    break;
-  default:
-    return;
-  }
-  s = QString(buf);
-  ask.set_text_title(s, _("Sell-Off: Results"));
-  ask.setStandardButtons(QMessageBox::Ok);
-  ask.exec();
+
+    result = new hud_message_box(gui()->central_wdg);
+    result->set_text_title(buf, _("Sell-Off: Results"));
+    result->setStandardButtons(QMessageBox::Ok);
+    result->setAttribute(Qt::WA_DeleteOnClose);
+    result->show();
+  });
 }
 
 /************************************************************************//**
@@ -1697,7 +1702,7 @@ void economy_report_dialog_popup(bool raise)
     i = gui()->gimme_index_of("ECO");
     fc_assert(i != -1);
     w = gui()->game_tab_widget->widget(i);
-    if (w->isVisible() == true) {
+    if (w->isVisible()) {
       gui()->game_tab_widget->setCurrentIndex(0);
       return;
     }

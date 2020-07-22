@@ -51,7 +51,6 @@
 #include "dialogs.h"
 #include "finddlg.h"
 #include "graphics.h"
-#include "gui_iconv.h"
 #include "gui_id.h"
 #include "gui_main.h"
 #include "gui_mouse.h"
@@ -154,7 +153,7 @@ static int players_action_callback(struct widget *pWidget)
 **************************************************************************/
 static int units_action_callback(struct widget *pWidget)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     set_wstate(pWidget, FC_WS_NORMAL);
     widget_redraw(pWidget);
     widget_mark_dirty(pWidget);
@@ -172,7 +171,10 @@ static int cities_action_callback(struct widget *pButton)
   set_wstate(pButton, FC_WS_DISABLED);
   widget_redraw(pButton);
   widget_mark_dirty(pButton);
-  if (Main.event.type == SDL_MOUSEBUTTONDOWN) {
+  if (Main.event.type == SDL_KEYDOWN) {
+    /* Ctrl-F shortcut */
+    popup_find_dialog();
+  } else if (Main.event.type == SDL_MOUSEBUTTONDOWN) {
     switch (Main.event.button.button) {
 #if 0
     case SDL_BUTTON_LEFT:
@@ -189,8 +191,8 @@ static int cities_action_callback(struct widget *pButton)
       city_report_dialog_popup(FALSE);
       break;
     }
-  } else {
-    popup_find_dialog();
+  } else if (PRESSED_EVENT(Main.event)) {
+    city_report_dialog_popup(FALSE);
   }
 
   return -1;
@@ -201,9 +203,7 @@ static int cities_action_callback(struct widget *pButton)
 **************************************************************************/
 static int end_turn_callback(struct widget *pButton)
 {
-  if (Main.event.type == SDL_KEYDOWN
-      || (Main.event.type == SDL_MOUSEBUTTONDOWN
-          && Main.event.button.button == SDL_BUTTON_LEFT)) {
+  if (PRESSED_EVENT(Main.event)) {
     widget_redraw(pButton);
     widget_flush(pButton);
     disable_focus_animation();
@@ -218,7 +218,7 @@ static int end_turn_callback(struct widget *pButton)
 **************************************************************************/
 static int revolution_callback(struct widget *pButton)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     set_wstate(pButton, FC_WS_DISABLED);
     widget_redraw(pButton);
     widget_mark_dirty(pButton);
@@ -233,7 +233,7 @@ static int revolution_callback(struct widget *pButton)
 **************************************************************************/
 static int research_callback(struct widget *pButton)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     science_report_dialog_popup(TRUE);
   }
 
@@ -245,7 +245,7 @@ static int research_callback(struct widget *pButton)
 **************************************************************************/
 static int economy_callback(struct widget *pButton)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     economy_report_dialog_popup(FALSE);
   }
 
@@ -259,7 +259,7 @@ static int economy_callback(struct widget *pButton)
 **************************************************************************/
 static int toggle_unit_info_window_callback(struct widget *pIcon_Widget)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     struct widget *pBuf = NULL;
 
     clear_surface(pIcon_Widget->theme, NULL);
@@ -385,7 +385,7 @@ static int toggle_unit_info_window_callback(struct widget *pIcon_Widget)
 **************************************************************************/
 static int toggle_map_window_callback(struct widget *pMap_Button)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     struct unit *pFocus = head_of_units_in_focus();
     struct widget *pWidget;
 
@@ -523,7 +523,7 @@ static int toggle_map_window_callback(struct widget *pMap_Button)
 **************************************************************************/
 static int toggle_minimap_mode_callback(struct widget *pWidget)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     if (pWidget != NULL) {
       selected_widget = pWidget;
       set_wstate(pWidget, FC_WS_SELECTED);
@@ -541,7 +541,7 @@ static int toggle_minimap_mode_callback(struct widget *pWidget)
 **************************************************************************/
 static int toggle_msg_window_callback(struct widget *pWidget)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     if (meswin_dialog_is_open()) {
       meswin_dialog_popdown();
       copy_chars_to_utf8_str(pWidget->info_label, _("Show Messages (F9)"));
@@ -589,7 +589,7 @@ int resize_minimap(void)
 **************************************************************************/
 static int move_scale_minimap_dlg_callback(struct widget *pWindow)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     move_window_group(pScale_MiniMap_Dlg->pBeginWidgetList, pWindow);
   }
 
@@ -601,7 +601,7 @@ static int move_scale_minimap_dlg_callback(struct widget *pWindow)
 **************************************************************************/
 static int popdown_scale_minimap_dlg_callback(struct widget *pWidget)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     if (pScale_MiniMap_Dlg) {
       popdown_window_group_dialog(pScale_MiniMap_Dlg->pBeginWidgetList,
                                   pScale_MiniMap_Dlg->pEndWidgetList);
@@ -620,7 +620,7 @@ static int popdown_scale_minimap_dlg_callback(struct widget *pWidget)
 **************************************************************************/
 static int up_width_callback(struct widget *pWidget)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     widget_redraw(pWidget);
     widget_mark_dirty(pWidget);
     if ((((OVERVIEW_TILE_WIDTH + 1) * map.xsize) +
@@ -647,7 +647,7 @@ static int up_width_callback(struct widget *pWidget)
 **************************************************************************/
 static int down_width_callback(struct widget *pWidget)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     widget_redraw(pWidget);
     widget_mark_dirty(pWidget);
     if (OVERVIEW_TILE_WIDTH > 1) {
@@ -671,7 +671,7 @@ static int down_width_callback(struct widget *pWidget)
 **************************************************************************/
 static int up_height_callback(struct widget *pWidget)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     widget_redraw(pWidget);
     widget_mark_dirty(pWidget);
     if (Main.screen->h -
@@ -696,7 +696,7 @@ static int up_height_callback(struct widget *pWidget)
 **************************************************************************/
 static int down_height_callback(struct widget *pWidget)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     widget_redraw(pWidget);
     widget_mark_dirty(pWidget);
     if (OVERVIEW_TILE_HEIGHT > 1) {
@@ -886,7 +886,7 @@ static void popup_minimap_scale_dialog(void)
 **************************************************************************/
 static int move_scale_unitinfo_dlg_callback(struct widget *pWindow)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     move_window_group(pScale_UnitInfo_Dlg->pBeginWidgetList, pWindow);
   }
 
@@ -898,7 +898,7 @@ static int move_scale_unitinfo_dlg_callback(struct widget *pWindow)
 **************************************************************************/
 static int popdown_scale_unitinfo_dlg_callback(struct widget *pWidget)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     if (pScale_UnitInfo_Dlg) {
       popdown_window_group_dialog(pScale_UnitInfo_Dlg->pBeginWidgetList,
                                   pScale_UnitInfo_Dlg->pEndWidgetList);
@@ -1028,7 +1028,7 @@ int resize_unit_info(void)
 **************************************************************************/
 static int up_info_width_callback(struct widget *pWidget)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     widget_redraw(pWidget);
     widget_mark_dirty(pWidget);
     if (main_window_width() - ((INFO_WIDTH + 1) * map.xsize + BLOCKU_W +
@@ -1048,7 +1048,7 @@ static int up_info_width_callback(struct widget *pWidget)
 **************************************************************************/
 static int down_info_width_callback(struct widget *pWidget)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     widget_redraw(pWidget);
     widget_mark_dirty(pWidget);
     if (INFO_WIDTH > INFO_WIDTH_MIN) {
@@ -1066,7 +1066,7 @@ static int down_info_width_callback(struct widget *pWidget)
 **************************************************************************/
 static int up_info_height_callback(struct widget *pWidget)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     widget_redraw(pWidget);
     widget_mark_dirty(pWidget);
     if (Main.screen->h - ((INFO_HEIGHT + 1) * map.ysize +
@@ -1085,7 +1085,7 @@ static int up_info_height_callback(struct widget *pWidget)
 **************************************************************************/
 static int down_info_height_callback(struct widget *pWidget)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     widget_redraw(pWidget);
     widget_mark_dirty(pWidget);
     if (INFO_HEIGHT > INFO_HEIGHT_MIN) {
@@ -1300,23 +1300,27 @@ static int minimap_window_callback(struct widget *pWidget)
 **************************************************************************/
 static int unit_info_window_callback(struct widget *pWidget)
 {
-  switch (Main.event.button.button) {
+  if (Main.event.type == SDL_MOUSEBUTTONDOWN) {
+    switch (Main.event.button.button) {
 #if 0
-  case SDL_BUTTON_LEFT:
+    case SDL_BUTTON_LEFT:
 
-    break;
+      break;
 #endif
-  case SDL_BUTTON_MIDDLE:
-    request_center_focus_unit();
-    break;
-  case SDL_BUTTON_RIGHT:
+    case SDL_BUTTON_MIDDLE:
+      request_center_focus_unit();
+      break;
+    case SDL_BUTTON_RIGHT:
 #ifdef SCALE_UNITINFO
-    popup_unitinfo_scale_dialog();
+      popup_unitinfo_scale_dialog();
 #endif
-    break;
-  default:
+      break;
+    default:
+      key_unit_wait();
+      break;
+    }
+  } else if (PRESSED_EVENT(Main.event)) {
     key_unit_wait();
-    break;
   }
 
   return -1;
@@ -2279,6 +2283,31 @@ void enable_and_redraw_revolution_button(void)
   widget_redraw(pRevolution_Button);
   widget_mark_dirty(pRevolution_Button);
 }
+/**********************************************************************//**
+  Finger down handler
+**************************************************************************/
+void finger_down_on_map(struct finger_behavior *finger_behavior)
+{
+  if (C_S_RUNNING != client_state()) {
+    return;
+  }
+
+  key_unit_goto();
+  update_mouse_cursor(CURSOR_GOTO);
+}
+
+/**********************************************************************//**
+  Finger up handler
+**************************************************************************/
+void finger_up_on_map(struct finger_behavior *finger_behavior)
+{
+  if (C_S_RUNNING != client_state()) {
+    return;
+  }
+  update_mouse_cursor(CURSOR_DEFAULT);
+  action_button_pressed(finger_behavior->event.x,
+                        finger_behavior->event.y, SELECT_POPUP);
+}
 
 /**********************************************************************//**
   Mouse click handler
@@ -2562,10 +2591,22 @@ bool map_event_handler(SDL_Keysym key)
         }
         return FALSE;
 
-        /* show city growth Ctrl+r */
-      case SDLK_r:
+        /* show city growth Ctrl+o */
+        /* show pollution - Ctrl+Shift+o */
+      case SDLK_o:
         if (LCTRL || RCTRL) {
-          key_city_growth_toggle();
+          if (LSHIFT || RSHIFT) {
+            key_pollution_toggle();
+          } else {
+            key_city_growth_toggle();
+          }
+        }
+        return FALSE;
+
+        /* show bases - Ctrl+Shift+f */
+      case SDLK_f:
+        if ((LCTRL || RCTRL) && (LSHIFT || RSHIFT)) {
+          request_toggle_bases();
         }
         return FALSE;
 
@@ -2610,13 +2651,6 @@ bool map_event_handler(SDL_Keysym key)
         }
         return FALSE;
 
-        /* show bases - Ctrl+Shift+f */
-      case SDLK_f:
-        if ((LCTRL || RCTRL) && (LSHIFT || RSHIFT)) {
-          request_toggle_bases();
-        }
-        return FALSE;
-
         /* show resources - Ctrl+s */
       case SDLK_s:
         if (LCTRL || RCTRL) {
@@ -2628,13 +2662,6 @@ bool map_event_handler(SDL_Keysym key)
       case SDLK_h:
         if (LCTRL || RCTRL) {
           key_huts_toggle();
-        }
-        return FALSE;
-
-        /* show pollution - Ctrl+o */
-      case SDLK_o:
-        if (LCTRL || RCTRL) {
-          key_pollution_toggle();
         }
         return FALSE;
 
@@ -2696,7 +2723,7 @@ bool map_event_handler(SDL_Keysym key)
 **************************************************************************/
 static int newcity_name_edit_callback(struct widget *pEdit)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     if (pNewCity_Dlg->pBeginWidgetList->string_utf8->text == NULL) {
       /* empty input -> restore previous content */
       copy_chars_to_utf8_str(pEdit->string_utf8, pSuggestedCityName);
@@ -2714,9 +2741,7 @@ static int newcity_name_edit_callback(struct widget *pEdit)
 **************************************************************************/
 static int newcity_ok_callback(struct widget *ok_button)
 {
-  if (Main.event.type == SDL_KEYDOWN
-      || (Main.event.type == SDL_MOUSEBUTTONDOWN
-          && Main.event.button.button == SDL_BUTTON_LEFT)) {
+  if (PRESSED_EVENT(Main.event)) {
 
     finish_city(ok_button->data.tile, pNewCity_Dlg->pBeginWidgetList->string_utf8->text);
 
@@ -2737,7 +2762,7 @@ static int newcity_ok_callback(struct widget *ok_button)
 **************************************************************************/
 static int newcity_cancel_callback(struct widget *pCancel_Button)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     popdown_window_group_dialog(pNewCity_Dlg->pBeginWidgetList,
                                 pNewCity_Dlg->pEndWidgetList);
 
@@ -2758,7 +2783,7 @@ static int newcity_cancel_callback(struct widget *pCancel_Button)
 **************************************************************************/
 static int move_new_city_dlg_callback(struct widget *pWindow)
 {
-  if (Main.event.button.button == SDL_BUTTON_LEFT) {
+  if (PRESSED_EVENT(Main.event)) {
     move_window_group(pNewCity_Dlg->pBeginWidgetList, pWindow);
   }
 
